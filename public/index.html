@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LXFlow</title>
+<style>
+/* ===== theme tokens (overridden by [data-theme]) ===== */
+:root{
+  --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a323d;
+  --text:#e6edf3; --dim:#8b97a7; --accent:#4f8cff; --accent2:#7c5cff;
+  --row:#11161d; --rowalt:#141a22; --cur:#1f6feb33; --ok:#3fb950; --warn:#d29922;
+  --radius:12px; --fs:14px;
+}
+[data-theme=light]{
+  --bg:#f5f7fa; --panel:#fff; --panel2:#eef1f5; --line:#d6dce4; --text:#1a1f26;
+  --dim:#5a6577; --accent:#2563eb; --accent2:#7c3aed; --row:#fff; --rowalt:#f3f6fa;
+  --cur:#2563eb22; --ok:#1a7f37; --warn:#9a6700;
+}
+[data-theme=grey]{
+  --bg:#1a1a1a; --panel:#242424; --panel2:#2e2e2e; --line:#3a3a3a; --text:#e0e0e0;
+  --dim:#9a9a9a; --accent:#bdbdbd; --accent2:#8f8f8f; --row:#202020; --rowalt:#262626;
+  --cur:#ffffff1a; --ok:#cfcfcf; --warn:#a8a8a8;
+}
+[data-theme=contrast]{
+  --bg:#000; --panel:#000; --panel2:#0a0a0a; --line:#fff; --text:#fff;
+  --dim:#ffd400; --accent:#00ff00; --accent2:#00ffff; --row:#000; --rowalt:#0c0c0c;
+  --cur:#ffff0033; --ok:#00ff00; --warn:#ffff00; --fs:15px;
+}
+[data-theme=vapor]{
+  --bg:#1a0b2e; --panel:#241046; --panel2:#2d1356; --line:#ff52d9; --text:#f6e7ff;
+  --dim:#b38cff; --accent:#ff52d9; --accent2:#52f6ff; --row:#1f0d39; --rowalt:#260f44;
+  --cur:#52f6ff2e; --ok:#52ffb0; --warn:#ffe14d;
+}
+[data-theme=rgb]{
+  --bg:#050505; --panel:#0c0c0c; --panel2:#121212; --line:#222; --text:#fff;
+  --dim:#888; --accent:#ff0040; --accent2:#00d0ff; --row:#0a0a0a; --rowalt:#101010;
+  --cur:#00ff8033; --ok:#00ff40; --warn:#ffe000;
+}
+[data-theme=cmy]{
+  --bg:#fbfbf4; --panel:#fff; --panel2:#f0f0e8; --line:#d8d8c8; --text:#101014;
+  --dim:#6a6a72; --accent:#00aec7; --accent2:#d4007a; --row:#fff; --rowalt:#f6f6ee;
+  --cur:#ffd80055; --ok:#00a0a0; --warn:#d4a000;
+}
+[data-theme=amber]{
+  --bg:#0a0600; --panel:#140d02; --panel2:#1b1204; --line:#3a2a0a; --text:#ffb000;
+  --dim:#a67400; --accent:#ffb000; --accent2:#ff7b00; --row:#0f0a01; --rowalt:#150e02;
+  --cur:#ffb00026; --ok:#ffb000; --warn:#ff7b00;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font:var(--fs)/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius);
+  padding:6px 12px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+input,select{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:6px 8px}
+.hidden{display:none!important}
+
+/* layout */
+#app{display:grid;grid-template-columns:1fr 260px;grid-template-rows:auto auto 1fr;height:100vh}
+header{grid-column:1/3;display:flex;align-items:center;gap:10px;padding:8px 14px;
+  background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:15px;margin:0;letter-spacing:.5px;color:var(--accent)}
+header .spacer{flex:1}
+#subbar{grid-column:1/3;display:flex;align-items:center;gap:8px;padding:6px 14px;
+  background:var(--panel2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+#subbar select,#subbar input{padding:4px 6px}
+main{overflow:auto;position:relative}
+aside{background:var(--panel);border-left:1px solid var(--line);overflow:auto;padding:10px}
+
+/* grid */
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+thead th{position:sticky;top:0;background:var(--panel2);border-bottom:2px solid var(--line);
+  text-align:left;padding:8px;font-size:12px;letter-spacing:.4px;color:var(--dim);z-index:2;white-space:nowrap}
+tbody td{border-bottom:1px solid var(--line);padding:6px 8px;vertical-align:top;position:relative}
+tbody tr:nth-child(odd){background:var(--row)}
+tbody tr:nth-child(even){background:var(--rowalt)}
+tbody tr.cur{background:var(--cur)!important;box-shadow:inset 3px 0 0 var(--accent)}
+tbody tr.dragging{opacity:.4}
+tbody tr.dropt{box-shadow:inset 0 2px 0 var(--accent)}
+td[contenteditable]{outline:none;min-width:30px}
+td[contenteditable]:focus{box-shadow:inset 0 0 0 2px var(--accent);border-radius:4px}
+td.locked{cursor:not-allowed;opacity:.92}
+.lockbadge{position:absolute;top:3px;right:3px;width:15px;height:15px;border-radius:50%;
+  font-size:9px;display:grid;place-items:center;color:#000;font-weight:700}
+td.rowh{cursor:grab;user-select:none;color:var(--dim);text-align:center;width:22px;font-size:12px}
+td.rowact{white-space:nowrap}
+button.mini{padding:1px 7px;font-size:13px;line-height:1.2;margin:0 1px}
+.markers{display:flex;gap:3px;flex-wrap:wrap}
+.marker{width:14px;height:14px;border-radius:50%;font-size:9px;display:grid;place-items:center;color:#000;font-weight:700}
+.gobtn{position:fixed;right:280px;bottom:24px;z-index:30;font-size:15px;padding:14px 26px;
+  background:var(--ok);border-color:var(--ok);color:#000;font-weight:700;border-radius:40px;
+  box-shadow:0 6px 18px #0007}
+
+/* presence */
+.usr{display:flex;align-items:center;gap:8px;padding:6px;border-radius:var(--radius);margin-bottom:4px;background:var(--panel2)}
+.dot{width:10px;height:10px;border-radius:50%;flex:none}
+.usr .pos{color:var(--dim);font-size:12px}
+.usr .ft{margin-left:auto}
+aside h3{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim);margin:14px 0 6px}
+
+/* modal */
+.scrim{position:fixed;inset:0;background:#000a;display:grid;place-items:center;z-index:50}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px;
+  width:min(560px,92vw);max-height:88vh;overflow:auto}
+.modal h2{margin:0 0 14px;font-size:18px}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.field label{font-size:12px;color:var(--dim)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.kb{display:flex;justify-content:space-between;align-items:center;padding:6px;border-bottom:1px solid var(--line)}
+.kb kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:2px 8px;min-width:60px;text-align:center;cursor:pointer}
+.swatch{width:26px;height:26px;border-radius:6px;border:2px solid var(--line);cursor:pointer}
+.swatch.sel{border-color:var(--accent)}
+.colchip{display:flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);
+  border-radius:6px;padding:4px 8px;margin:3px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);
+  border:1px solid var(--accent);padding:10px 18px;border-radius:8px;z-index:60}
+small.hint{color:var(--dim)}
+tr.imgrow td{padding:4px 8px;background:var(--rowalt);border-bottom:1px solid var(--line)}
+.thumbs{display:flex;flex-wrap:wrap;gap:8px}
+.thumb{position:relative}
+.thumb img{height:84px;max-width:220px;border:1px solid var(--line);border-radius:6px;cursor:zoom-in;display:block;object-fit:contain;background:#0003}
+.thumb .thx{position:absolute;top:2px;right:2px;width:18px;height:18px;line-height:1;padding:0;border-radius:50%;background:#000a;color:#fff;border:none;cursor:pointer;font-size:11px}
+body.mobile .thumb img{height:120px}
+input[type=color]{width:48px;height:28px;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--panel);cursor:pointer}
+hr{border:none;border-top:1px solid var(--line);margin:16px 0}
+button.danger{background:#3a1414;border-color:#7a2222;color:#ff8a8a}
+button.danger:hover{border-color:#ff5d5d}
+/* selection */
+.selcell{width:30px;text-align:center}
+tbody tr.selrow{outline:2px solid var(--accent2);outline-offset:-2px}
+button.mini.on{background:var(--warn);border-color:var(--warn);color:#000}
+/* mobile slider switch */
+.switch{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+.switch input{display:none}
+.switch .track{width:38px;height:20px;border-radius:20px;background:var(--panel2);border:1px solid var(--line);position:relative;transition:.15s}
+.switch .knob{position:absolute;top:1px;left:1px;width:16px;height:16px;border-radius:50%;background:var(--dim);transition:.15s}
+.switch input:checked + .track{background:var(--accent);border-color:var(--accent)}
+.switch input:checked + .track .knob{left:19px;background:#fff}
+.switch .slbl{font-size:12px;color:var(--dim)}
+/* sidebar notes */
+.snote{display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius);padding:6px 8px;margin-bottom:6px}
+.snote .pos{font-size:11px}
+/* show mode */
+#app.showmode .selcell,#app.showmode .rowact{opacity:.35}
+#app.showmode .rowh{cursor:default;opacity:.4}
+#app.showmode tbody td[contenteditable]{caret-color:transparent}
+#app.showmode tbody tr.cur{background:var(--cur)!important;box-shadow:inset 4px 0 0 var(--accent),0 0 0 2px var(--accent) inset}
+#app.showmode tbody tr.cur td{font-weight:600}
+#app.showmode tbody tr:not(.cur){opacity:.78}
+.showbadge{display:none}
+#app.showmode .showbadge{display:inline-block;margin-left:8px;color:var(--ok);font-weight:700}
+/* visual cue notifications */
+#notifs{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:80;display:flex;flex-direction:column;gap:10px;width:min(560px,94vw);pointer-events:none}
+.notif{pointer-events:auto;border-radius:12px;padding:14px 16px;box-shadow:0 10px 30px #0008;display:grid;grid-template-columns:auto 1fr auto;gap:4px 12px;align-items:center;animation:nin .25s ease}
+.notif.sb{background:var(--warn);color:#1a1200;border:2px solid #0003}
+.notif.go{background:var(--ok);color:#04210d;border:2px solid #0003}
+.notif.out{opacity:0;transform:translateY(-8px);transition:.4s}
+.notif .nk{font-weight:800;font-size:18px;grid-row:1/3;letter-spacing:.5px}
+.notif .nt{font-weight:700;font-size:16px}
+.notif .na{grid-column:2;font-size:13px;opacity:.85}
+.notif .nx{grid-row:1/3;background:#0002;border:none;border-radius:8px;color:inherit;font-weight:700;cursor:pointer;width:30px;height:30px}
+@keyframes nin{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+/* ===== mobile layout ===== */
+body.mobile #app{display:flex;flex-direction:column;height:100vh}
+body.mobile header{flex-wrap:wrap;gap:6px;padding:6px 8px}
+body.mobile header h1{font-size:13px}
+body.mobile #subbar{flex-wrap:wrap}
+body.mobile main{flex:1;min-height:0;overflow:auto}
+body.mobile aside{border-left:none;border-top:1px solid var(--line);max-height:34vh}
+body.mobile thead{display:none}
+body.mobile table,body.mobile tbody,body.mobile tr,body.mobile td{display:block;width:auto}
+body.mobile tbody tr{border:1px solid var(--line);border-radius:10px;margin:8px;padding:4px 2px;background:var(--row)}
+body.mobile tbody tr.cur{box-shadow:0 0 0 2px var(--accent)}
+body.mobile tbody td{border:none;padding:5px 10px;display:flex;gap:10px;align-items:flex-start}
+body.mobile tbody td[data-label]:before{content:attr(data-label);color:var(--dim);font-size:11px;text-transform:uppercase;min-width:70px;flex:none;padding-top:2px}
+body.mobile td.selcell,body.mobile td.rowh{display:none}
+body.mobile td.rowact{justify-content:flex-end}
+body.mobile .gobtn{right:auto;left:50%;transform:translateX(-50%);bottom:14px}
+.err{color:var(--warn);font-size:12px;min-height:14px}
+textarea{background:var(--panel);color:inherit;border:1px solid var(--line);border-radius:var(--radius);padding:8px;font:inherit;width:100%}
+.noteitem{background:var(--panel2);border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;margin-bottom:8px}
+.noteitem .pos{font-size:11px}
+.maprow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0}
+.maprow .src{color:var(--dim);font-size:13px}
+/* Tablet workspace: persistent controls, spacious touch targets, quiet surfaces. */
+button,input,select{min-height:44px}
+button{padding:10px 16px;font-weight:550;transition:background .15s,border-color .15s}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+button,summary,.switch{touch-action:manipulation}
+#app{height:100dvh;grid-template-columns:minmax(0,1fr) 264px;gap:0}
+header{padding:16px 20px;gap:12px;position:relative;z-index:35}
+header h1{font-size:22px;letter-spacing:-.8px;color:var(--text)}
+.version{font-size:11px;color:var(--dim);border:1px solid var(--line);padding:3px 7px;border-radius:6px}
+#meName{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim);font-size:12px}
+.history-tools{display:flex;gap:4px;padding-right:12px;border-right:1px solid var(--line)}
+.history-tools button{background:transparent;padding-inline:12px}
+.workspace-tools{position:relative}
+.workspace-tools summary{cursor:pointer;list-style:none;min-height:44px;display:flex;align-items:center;gap:16px;padding:10px 16px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel2);font-weight:550}
+.workspace-tools summary::-webkit-details-marker{display:none}
+.workspace-tools summary:after{content:'⌄';color:var(--dim)}
+.tool-menu{position:absolute;right:0;top:calc(100% + 10px);width:220px;display:grid;gap:6px;padding:10px;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 16px 48px #0006}
+.tool-menu button{text-align:left;background:transparent;border-color:transparent}
+.tool-menu button:hover{background:var(--panel2);border-color:var(--line)}
+#subbar{padding:12px 20px;gap:8px;background:var(--bg)}
+#subbar select{padding:10px 32px 10px 12px;max-width:240px;min-width:100px}
+#subbar button{background:var(--panel)}
+#subbar #addCue{border-color:var(--accent);color:var(--accent);margin-left:4px}
+main{margin:0 0 0 16px;border:1px solid var(--line);border-radius:16px 16px 0 0;padding-bottom:100px;scroll-padding-block:60px 100px;min-width:0;min-height:0}
+#grid thead th{height:48px;padding:12px;font-size:11px;text-transform:uppercase;letter-spacing:.7px;border-bottom-width:1px}
+#grid tbody td{padding:14px 12px;min-height:48px;line-height:1.55}
+#grid tbody tr.cur{box-shadow:inset 5px 0 0 var(--accent)}
+#grid td.rowact{padding:8px}
+button.mini{min-width:44px;min-height:44px;padding:8px;font-size:15px}
+input[type=checkbox]{width:20px;height:20px;min-height:20px;accent-color:var(--accent)}
+.selcell{min-width:44px}
+aside{padding:8px 18px 104px;border-left:0;background:var(--bg)}
+aside h3{font-size:10px;letter-spacing:1.2px;margin:22px 0 10px}
+aside h3:first-child{margin-top:12px}
+.usr,.snote{border:1px solid var(--line);background:var(--panel);padding:12px;border-radius:12px}
+#followSel{width:100%;margin-bottom:8px;font-size:12px}
+#myptr{font-size:17px;font-weight:650;min-height:58px;align-items:center;color:var(--accent)}
+.gobtn{right:24px;bottom:max(20px,env(safe-area-inset-bottom));min-width:216px;min-height:60px;border-radius:18px;font-size:18px;letter-spacing:1px;box-shadow:0 8px 32px #0005}
+.modal{border-radius:20px;padding:28px;max-height:90dvh;box-shadow:0 24px 80px #0006}
+.modal h2{font-size:22px;letter-spacing:-.5px}
+.field{gap:7px;margin-bottom:18px}
+.field label{font-weight:550}
+.swatch{width:44px;height:44px;border-radius:10px}
+.maprow{flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line)}
+.maprow .src{flex:1 1 130px}
+.maprow select{max-width:100%;flex:1 1 180px;min-width:0}
+.switch{min-height:44px;position:relative;padding:6px}
+.switch input{display:block;position:absolute;opacity:0;width:100%;height:100%;inset:0;cursor:pointer;margin:0}
+.switch:focus-within{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+.switch .track{pointer-events:none}
+#app.showmode #addDay,#app.showmode #addShow,#app.showmode #addCue,#app.showmode #renumber{display:none}
+#app.showmode #grid .rowact,#app.showmode #grid .selcell,#app.showmode #grid .rowh{display:none}
+body.mobile #app{height:100dvh}
+body.mobile header{padding:12px 16px;gap:8px}
+body.mobile header h1{font-size:21px}
+body.mobile main{margin:0 12px;flex:1 1 0;padding-bottom:96px;border:0;border-radius:0}
+body.mobile #grid tbody tr{margin:0 0 12px;padding:12px;border-radius:16px;background:var(--panel)}
+body.mobile #grid tbody td{padding:10px 8px;min-height:44px;overflow-wrap:anywhere}
+body.mobile #grid tbody td[data-label]:before{min-width:90px;width:25%;font-size:10px;letter-spacing:.7px;padding-top:4px}
+body.mobile #grid td.rowact{border-top:1px solid var(--line);margin-top:6px;padding-top:12px}
+body.mobile aside{max-height:22dvh;padding:0 16px 88px;flex-shrink:0}
+body.mobile .gobtn{left:auto;right:20px;transform:none;bottom:max(16px,env(safe-area-inset-bottom))}
+body.mobile #app.showmode #grid td[data-key]:empty{display:none}
+@media(min-width:700px){
+  body.mobile #grid tbody tr:not(.imgrow){display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 20px}
+  body.mobile #grid td[data-key=action],body.mobile #grid td[data-key=notes],body.mobile #grid td.rowact{grid-column:1/-1}
+  body.mobile #grid td[data-label]:before{width:110px;min-width:110px}
+}
+@media(max-width:1100px){
+  header{flex-wrap:wrap;padding:12px 16px} #meName{display:none}
+  #app{grid-template-columns:minmax(0,1fr) 224px}
+  .gobtn{min-width:184px;right:20px}
+  #subbar{padding:10px 16px} #subbar select{max-width:190px}
+}
+@media(max-width:600px){
+  .version{display:none}.history-tools{padding-right:0;border-right:0}
+  .history-tools button{padding-inline:10px}
+  header .spacer{display:none}header h1{margin-right:auto}
+  #subbar select{flex:1 1 28%;max-width:100%;min-width:0;font-size:12px}
+  #subbar{gap:6px}#subbar button{padding-inline:10px;font-size:12px}
+  .modal{padding:20px;width:96vw}.toast{width:90vw;bottom:88px}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div id="app" class="hidden">
+  <header>
+    <h1>LXFlow</h1>
+    <span class="version" title="Tablet interface update">1.3.0</span>
+    <span class="spacer"></span>
+    <span id="meName" class="pos"></span>
+    <label class="switch" title="Switch between cue cards and table"><input type="checkbox" id="tglMobile"><span class="track"><span class="knob"></span></span><span class="slbl">Cards</span></label>
+    <div class="history-tools">
+    <button id="undoBtn" disabled title="Undo the latest shared edit (Ctrl/Cmd+Z)">Undo</button>
+    <button id="redoBtn" disabled title="Redo a shared edit (Ctrl/Cmd+Shift+Z)">Redo</button>
+    </div>
+    <button id="btnShow" title="Show Mode: lock editing and follow the live cue">Show Mode</button>
+    <details class="workspace-tools" id="workspaceTools"><summary>Tools</summary><div class="tool-menu">
+    <button id="btnUpload">Import Doc</button>
+    <button id="btnCols">Columns</button>
+    <button id="btnNotes">Notes</button>
+    <button id="btnEvents">Events</button>
+    <button id="btnSettings" title="Settings">⚙ Settings</button>
+    </div></details>
+  </header>
+
+  <div id="subbar">
+    <select id="selEvent" title="Event"></select>
+    <select id="selDay" title="Day"></select>
+    <select id="selShow" title="Show"></select>
+    <button id="addDay">+ Day</button>
+    <button id="addShow">+ Show</button>
+    <button id="addCue">+ Cue</button>
+    <button id="renumber" title="Renumber the Cue # column 1..N for this show">Renumber</button>
+    <span id="selBar" class="hidden" style="display:flex;gap:6px;align-items:center">
+      <span id="selCount" class="hint"></span>
+      <button id="selCopy">Copy</button>
+      <button id="selDup">Duplicate</button>
+      <button id="selPaste" class="hidden">Paste…</button>
+      <button id="selDel">Delete</button>
+      <button id="selClear" title="Clear selection">✕</button>
+    </span>
+    <span class="spacer" style="flex:1"></span>
+    <small class="hint" id="followHint"></small>
+  </div>
+
+  <main>
+    <table id="grid">
+      <thead><tr id="head"></tr></thead>
+      <tbody id="body"></tbody>
+    </table>
+  </main>
+
+  <aside>
+    <h3>On This Page</h3>
+    <div id="presence"></div>
+    <h3>Auto-Track</h3>
+    <select id="followSel"><option value="">— follow no one —</option></select>
+    <small class="hint">Pins your view to the selected operator's cue.</small>
+    <h3>Your Pointer</h3>
+    <div id="myptr" class="usr"><span class="pos">Press GO / Space to advance</span></div>
+    <h3>Show Notes <button id="sideNoteAdd" class="mini" title="Open notes">+</button></h3>
+    <div id="sideNotes"></div>
+  </aside>
+</div>
+
+<button id="goBtn" class="gobtn hidden">GO ▸</button>
+
+<!-- sign-in -->
+<div id="signin" class="scrim">
+  <div class="modal">
+    <h2>Sign in</h2>
+    <div class="field"><label>Name</label><input id="inName" placeholder="e.g. Dom"></div>
+    <div class="field"><label>Position / Role</label>
+      <input id="inPos" placeholder="e.g. Lighting Op, Stage Manager, A2" list="positions">
+      <datalist id="positions">
+        <option>Stage Manager</option><option>Lighting Op</option><option>Audio A1</option>
+        <option>Audio A2</option><option>Video Op</option><option>Spot Op</option>
+        <option>Rigging</option><option>Director</option><option>Producer</option>
+      </datalist>
+    </div>
+    <div class="field"><label>Your color</label><div class="row" id="colorPick"></div></div>
+    <div class="field"><label>Room code (only if the host set one)</label>
+      <input id="inCode" placeholder="leave blank if none"></div>
+    <div class="field"><label>Server port (this session connects to current host)</label>
+      <input id="inPort" readonly></div>
+    <div class="err" id="codeErr"></div>
+    <div class="row"><button class="primary" id="doJoin">Enter</button></div>
+  </div>
+</div>
+
+<div id="notifs"></div>
+<div id="modalRoot"></div>
+
+<script type="module">
+/* ====================== client state ====================== */
+const $ = s => document.querySelector(s);
+const el = (t,a={},...k)=>{const e=document.createElement(t);for(const[x,v]of Object.entries(a)){
+  if(x==='class')e.className=v;else if(x==='html')e.innerHTML=v;else if(x.startsWith('on'))e.addEventListener(x.slice(2),v);else e.setAttribute(x,v);}
+  for(const c of k.flat())e.append(c?.nodeType?c:document.createTextNode(c));return e;};
+
+const PALETTES = ['dark','light','grey','contrast','vapor','rgb','cmy','amber','custom'];
+// element-level colors editable in the custom theme; labels are user-facing
+const THEME_VARS = [
+  {key:'bg',label:'Background'}, {key:'panel',label:'Top/side bars'}, {key:'panel2',label:'Buttons & headers'},
+  {key:'line',label:'Borders & lines'}, {key:'text',label:'Text'}, {key:'dim',label:'Muted text'},
+  {key:'accent',label:'Accent (primary)'}, {key:'accent2',label:'Accent 2'}, {key:'row',label:'Row background'},
+  {key:'rowalt',label:'Row (alternate)'}, {key:'cur',label:'Current-cue highlight'}, {key:'ok',label:'GO / success'},
+  {key:'warn',label:'Standby / warning'},
+];
+const DEFAULT_THEME = {bg:'#0e1116',panel:'#161b22',panel2:'#1c232d',line:'#2a323d',text:'#e6edf3',dim:'#8b97a7',accent:'#4f8cff',accent2:'#7c5cff',row:'#11161d',rowalt:'#141a22',cur:'#1f6feb',ok:'#3fb950',warn:'#d29922'};
+const COLORS = ['#4f8cff','#ff5d8f','#3fb950','#d29922','#7c5cff','#52f6ff','#ff7b00','#ff52d9','#00d0ff','#a0ffa0'];
+
+const store = {
+  load:(k,d)=>{try{return JSON.parse(localStorage.getItem('ros_'+k))??d}catch{return d}},
+  save:(k,v)=>localStorage.setItem('ros_'+k,JSON.stringify(v)),
+};
+
+let me = store.load('me', { id:'usr_'+Math.random().toString(16).slice(2,10), name:'', position:'', color:COLORS[0] });
+let theme = store.load('theme','dark');
+let keybinds = { ...{
+  go:'Space', up:'ArrowUp', down:'ArrowDown', top:'Home', bottom:'End',
+  addCue:'KeyN', delCue:'Delete', nextShow:'BracketRight', prevShow:'BracketLeft',
+}, ...store.load('keybinds', {}) };
+let hiddenCols = store.load('hiddenCols', []);   // array of column keys hidden locally
+let customTheme = store.load('customTheme', null);   // {varKey: '#rrggbb'} when using the Custom palette
+
+let state = { events: [] };
+const savedPointer = store.load('pointer', 0);
+let sel = typeof savedPointer==='object' && savedPointer ? {eventId:savedPointer.eventId,dayId:savedPointer.dayId,showId:savedPointer.showId} : {eventId:null,dayId:null,showId:null};
+let pointerIdx = Number.isInteger(savedPointer) ? savedPointer : -1;
+let pointerCueId = savedPointer?.cueId ?? null;
+let pointerShowId = sel.showId;
+let migratePointer = Number.isInteger(savedPointer);
+let historyState = {};
+let presence = [];
+let locks = [];
+let followId = '';
+let joinCode = '';
+let myEdit = null;        // { cueId, colKey } cell I currently hold
+let dragIdx = null;       // row index being dragged
+let notesRender = null;   // callback to refresh the open Show Notes feed
+let showMode = store.load('showMode', false);
+let mobile = store.load('mobile', window.matchMedia('(max-width:820px)').matches);
+let selected = new Set();   // selected cue ids (current show)
+let clip = [];              // copied cue rows (clones, ids stripped)
+let firedNotes = new Set(); // notification keys already shown
+let ws;
+
+applyTheme();
+
+/* ====================== websocket ====================== */
+function connect(){
+  ws = new WebSocket(`ws://${location.host}`);
+  ws.onopen = ()=> ws.send(JSON.stringify({ t:'join', ...me, code:joinCode, pointer:currentPointer() }));
+  ws.onmessage = e=>{
+    const m = JSON.parse(e.data);
+    if(m.t==='state'){ historyState=m.history||{}; renderHistory(); if(!myEdit){ state.events = m.events; ensureSel(); renderAll(); } else { state.events = m.events; ensureSel(); reconcilePointer(); } send({t:'pointer',pointer:currentPointer()}); if(notesRender) notesRender(); }
+    else if(m.t==='presence'){ presence = m.users; renderPresence(); applyFollow(); if(!followId && !myEdit) renderBody(); }
+    else if(m.t==='locks'){ locks = m.locks; applyLocks(); }
+    else if(m.t==='denied'){ onDenied(m.reason); }
+    else if(m.t==='error'){ toast(m.message||'The operation could not be completed'); }
+    else if(m.t==='lockDenied'){ onLockDenied(m.cueId, m.colKey, m.by); }
+    else if(m.t==='net:set'){ toast(m.ok ? 'Network adapter saved \u2014 applies next time you start the app' : (m.error||'Not allowed')); }
+    else if(m.t==='joined'){ /* ack */ }
+  };
+  ws.onclose = ()=>{ if(!$('#app').classList.contains('hidden')) setTimeout(connect, 1000); };
+}
+const send = o => ws?.readyState===1 && ws.send(JSON.stringify(o));
+
+/* ====================== selection helpers ====================== */
+function curEvent(){ return state.events.find(e=>e.id===sel.eventId); }
+function curDay(){ return curEvent()?.days.find(d=>d.id===sel.dayId); }
+function curShow(){ return curDay()?.shows.find(s=>s.id===sel.showId); }
+function ensureSel(){
+  if(!curEvent()) sel.eventId = state.events[0]?.id;
+  if(!curDay())   sel.dayId   = curEvent()?.days[0]?.id;
+  if(!curShow())  sel.showId  = curDay()?.shows[0]?.id;
+}
+// Cue IDs are authoritative. A deleted active cue leaves an explicit empty pointer.
+function reconcilePointer(){
+  const show=curShow();
+  if(!show){ pointerIdx=-1; return; }
+  if(migratePointer){ pointerCueId=show.cues[Math.max(0,pointerIdx)]?.id??null; migratePointer=false; }
+  else if(pointerShowId!==show.id){ pointerCueId=show.cues[0]?.id??null; }
+  pointerShowId=show.id;
+  pointerIdx=show.cues.findIndex(c=>c.id===pointerCueId);
+  if(pointerIdx<0) pointerCueId=null;
+  store.save('pointer',{...sel,cueId:pointerCueId,cueIdx:pointerIdx});
+}
+function setPointer(idx){ pointerShowId=sel.showId; migratePointer=false; pointerCueId=curShow()?.cues[idx]?.id??null; reconcilePointer(); }
+function pointerIndex(pointer){
+  if(!pointer || pointer.showId!==sel.showId) return -1;
+  if(Object.prototype.hasOwnProperty.call(pointer,'cueId')) return curShow()?.cues.findIndex(c=>c.id===pointer.cueId)??-1;
+  return Number.isInteger(pointer.cueIdx) && curShow()?.cues[pointer.cueIdx] ? pointer.cueIdx : -1;
+}
+function currentPointer(){ return { ...sel, cueId:pointerCueId, cueIdx:pointerIdx }; }
+function pushEvent(){ reconcilePointer(); const ev=curEvent(); if(ev) send({t:'event:update', event:ev}); }
+function pushPointer(){ reconcilePointer(); send({t:'pointer', pointer:currentPointer()}); renderMyPtr(); renderBody(); afterPointer(); }
+function activeIdx(){ if(followId) return pointerIndex(presence.find(u=>u.id===followId)?.pointer); reconcilePointer(); return pointerIdx; }
+function afterPointer(){ checkNotifications(activeIdx()); if(showMode) scrollToActive(); }
+function scrollToActive(){ document.querySelectorAll('#body tr[data-idx]')[activeIdx()]?.scrollIntoView({block:'center',behavior:'smooth'}); }
+
+/* ====================== render ====================== */
+function visibleCols(){ return (curEvent()?.columns||[]).filter(c=>!hiddenCols.includes(c.key)); }
+function lockOf(cueId,colKey){ return locks.find(l=>l.cueId===cueId && l.colKey===colKey && l.showId===sel.showId); }
+
+function renderAll(){ reconcilePointer(); renderSelectors(); renderHead(); renderBody(); renderPresence(); renderMyPtr(); updateNotesBadge(); renderSideNotes(); }
+function updateNotesBadge(){ const n=(curEvent()?.notes||[]).length; const b=$('#btnNotes'); if(b) b.textContent = n? `Notes (${n})` : 'Notes'; }
+
+function renderSelectors(){
+  const evSel=$('#selEvent'), daySel=$('#selDay'), showSel=$('#selShow');
+  evSel.innerHTML=''; state.events.forEach(e=>evSel.append(el('option',{value:e.id},e.name)));
+  evSel.value=sel.eventId;
+  const ev=curEvent(); daySel.innerHTML='';
+  ev?.days.forEach(d=>daySel.append(el('option',{value:d.id}, d.label+(d.date?` (${d.date})`:''))));
+  daySel.value=sel.dayId;
+  const d=curDay(); showSel.innerHTML='';
+  d?.shows.forEach(s=>showSel.append(el('option',{value:s.id}, s.label)));
+  showSel.value=sel.showId;
+}
+
+function renderHead(){
+  const head=$('#head'); head.innerHTML='';
+  const all=el('input',{type:'checkbox',title:'Select all'});
+  all.addEventListener('change',e=>{ const show=curShow(); if(!show)return; if(e.target.checked) show.cues.forEach(c=>selected.add(c.id)); else selected.clear(); renderBody(); });
+  head.append(el('th',{class:'selcell'}, all));
+  head.append(el('th',{class:'rowh'}, ''));
+  visibleCols().forEach(c=>head.append(el('th',{style:`min-width:${c.width||120}px`}, c.label)));
+  head.append(el('th',{}, 'On Cue'));
+  head.append(el('th',{class:'rowact'}, ''));            // row actions
+}
+
+function renderBody(){
+  reconcilePointer();
+  const body=$('#body'); body.innerHTML='';
+  const show=curShow(); if(!show){ updateSelBar(); return; }
+  show.cues.forEach((cue,idx)=>{
+    const tr=el('tr',{'data-idx':idx});
+    if(idx===pointerIdx) tr.classList.add('cur');
+    if(selected.has(cue.id)) tr.classList.add('selrow');
+
+    // selection checkbox
+    const selTd=el('td',{class:'selcell'});
+    const cb=el('input',{type:'checkbox'}); cb.checked=selected.has(cue.id);
+    cb.addEventListener('click',e=>e.stopPropagation());
+    cb.addEventListener('change',e=>toggleSel(cue.id,e.target.checked));
+    selTd.append(cb); tr.append(selTd);
+
+    // drag handle / number
+    const handle=el('td',{class:'rowh',draggable:'true',title:'Drag to reorder'}, '\u2807');
+    handle.addEventListener('dragstart',e=>{ dragIdx=idx; e.dataTransfer.effectAllowed='move'; tr.classList.add('dragging'); });
+    handle.addEventListener('dragend',()=>tr.classList.remove('dragging'));
+    tr.append(handle);
+
+    // editable cells (listeners always attached; lock/show-mode toggle editability)
+    visibleCols().forEach(c=>{
+      // Cue # auto-fills by position when blank; a typed value sticks and wins.
+      const isCueNo = c.key==='cue';
+      const hasVal = cue[c.key] && String(cue[c.key]).trim()!=='';
+      const shown = (isCueNo && !hasVal) ? String(idx+1) : (cue[c.key]||'');
+      const td=el('td',{ 'data-key':c.key, 'data-cue':cue.id, 'data-label':c.label }, shown);
+      td.addEventListener('focus',()=>cellFocus(cue.id,c.key));
+      td.addEventListener('input',ev=>{ cue[c.key]=ev.target.textContent; });
+      td.addEventListener('blur',()=>cellBlur(cue.id,c.key));
+      tr.append(td);
+    });
+
+    // operator markers
+    const ops=el('td',{'data-label':'On Cue'}); const wrap=el('div',{class:'markers'});
+    presence.forEach(u=>{
+      if(u.pointer && u.pointer.showId===sel.showId && pointerIndex(u.pointer)===idx){
+        wrap.append(el('div',{class:'marker',style:`background:${u.color}`,title:`${u.name} (${u.position})`}, (u.name||'?')[0].toUpperCase()));
+      }
+    });
+    ops.append(wrap); tr.append(ops);
+
+    // row actions
+    const bell=el('button',{class:'mini'+(cue._notify?' on':''), title: cue._notify? ('Notification: '+cue._notify.text) : 'Add cue notification', onclick:e=>{e.stopPropagation();editNotify(idx);}}, '\ud83d\udd14');
+    const imgBtn=el('button',{class:'mini',title:'Attach image to this cue',onclick:e=>{e.stopPropagation();attachImageToCue(idx);}},'\ud83d\uddbc');
+    const act=el('td',{class:'rowact','data-label':''},
+      imgBtn, bell,
+      el('button',{class:'mini',title:'Insert cue below',onclick:e=>{e.stopPropagation();insertCueAt(idx+1);}},'\uff0b'),
+      el('button',{class:'mini',title:'Delete cue',onclick:e=>{e.stopPropagation();deleteCue(idx);}},'\u2715'));
+    tr.append(act);
+
+    // drag drop targets
+    tr.addEventListener('dragover',e=>{ e.preventDefault(); tr.classList.add('dropt'); });
+    tr.addEventListener('dragleave',()=>tr.classList.remove('dropt'));
+    tr.addEventListener('drop',e=>{ e.preventDefault(); tr.classList.remove('dropt'); dropOnRow(idx); });
+
+    tr.addEventListener('click',e=>{
+      if(e.target.isContentEditable || e.target.closest('.rowact') || e.target.classList.contains('rowh') || e.target.closest('.selcell')) return;
+      setPointer(idx); pushPointer();
+    });
+    body.append(tr);
+    if(cue._images && cue._images.length){
+      const itr=el('tr',{class:'imgrow'});
+      const itd=el('td',{colspan:String(visibleCols().length+4)});
+      const strip=el('div',{class:'thumbs'});
+      cue._images.forEach(id=>{
+        const cell=el('div',{class:'thumb'});
+        const img=el('img',{src:'/img/'+id, loading:'lazy', alt:'cue image', onclick:()=>enlargeImage(id)});
+        const x=el('button',{class:'thx',title:'Remove image',onclick:e=>{e.stopPropagation();removeCueImage(idx,id);}},'\u2715');
+        cell.append(img,x); strip.append(cell);
+      });
+      itd.append(strip); itr.append(itd); body.append(itr);
+    }
+  });
+  applyLocks();
+  updateSelBar();
+}
+
+function applyLocks(){
+  document.querySelectorAll('#body td[data-cue]').forEach(td=>{
+    const cueId=td.getAttribute('data-cue'), colKey=td.getAttribute('data-key');
+    const lk=lockOf(cueId,colKey);
+    const lockedByOther = lk && lk.userId!==me.id;
+    const oldb=td.querySelector('.lockbadge'); if(oldb) oldb.remove();
+    if(lockedByOther){
+      td.classList.add('locked');
+      td.removeAttribute('contenteditable');
+      td.style.boxShadow=`inset 0 0 0 2px ${lk.color}`;
+      td.title=`${lk.name} is editing`;
+      td.append(el('span',{class:'lockbadge',style:`background:${lk.color}`}, (lk.name||'?')[0].toUpperCase()));
+    } else {
+      td.classList.remove('locked');
+      td.title='';
+      if(!(myEdit && myEdit.cueId===cueId && myEdit.colKey===colKey)) td.style.boxShadow='';
+      if(showMode) td.removeAttribute('contenteditable'); else td.setAttribute('contenteditable','true');
+    }
+  });
+}
+
+function renderPresence(){
+  const box=$('#presence'); box.innerHTML='';
+  const fs=$('#followSel');
+  fs.innerHTML='<option value="">— follow no one —</option>';
+  presence.forEach(u=>{
+    box.append(el('div',{class:'usr'},
+      el('span',{class:'dot',style:`background:${u.color}`}),
+      el('div',{},
+        el('div',{}, u.name+(u.id===me.id?' (you)':'')),
+        el('div',{class:'pos'}, u.position||'')),
+    ));
+    if(u.id!==me.id) fs.append(el('option',{value:u.id}, `${u.name} — ${u.position||'?'}`));
+  });
+  fs.value = followId && presence.some(u=>u.id===followId) ? followId : '';
+}
+
+function renderMyPtr(){
+  reconcilePointer();
+  const show=curShow(); const cue=show?.cues[pointerIdx];
+  const c=visibleCols()[0]?.key;
+  $('#myptr').innerHTML='';
+  $('#myptr').append(
+    el('span',{class:'dot',style:`background:${me.color}`}),
+    el('span',{}, show? (cue ? `Cue ${pointerIdx+1} / ${show.cues.length}` : 'No active cue — press GO to start') : '—'),
+    el('span',{class:'pos',style:'margin-left:auto'}, cue?.[c]||'')
+  );
+  $('#meName').textContent = `${me.name} · ${me.position||''}`;
+}
+
+/* ====================== cell locking ====================== */
+function cellFocus(cueId,colKey){
+  myEdit={cueId,colKey};
+  send({t:'lock', showId:sel.showId, cueId, colKey});
+}
+function cellBlur(cueId,colKey){
+  if(myEdit && myEdit.cueId===cueId && myEdit.colKey===colKey) myEdit=null;
+  pushEvent();
+  send({t:'unlock', showId:sel.showId, cueId, colKey});
+}
+function onLockDenied(cueId,colKey,by){
+  const td=$(`#body td[data-cue="${cueId}"][data-key="${colKey}"]`);
+  if(td) td.blur();
+  if(myEdit && myEdit.cueId===cueId && myEdit.colKey===colKey) myEdit=null;
+  toast(`That cell is being edited${by?` by ${by}`:''}`);
+  applyLocks();
+}
+
+/* ====================== row ops ====================== */
+function deleteCue(idx){
+  const show=curShow(); if(!show)return;
+  show.cues.splice(idx,1);
+  reconcilePointer();
+  pushEvent(); renderBody(); pushPointer();
+}
+function insertCueAt(idx){
+  const show=curShow(); if(!show)return;
+  const cue={id:'cue_'+Math.random().toString(16).slice(2,10)};
+  visibleCols().forEach(c=>cue[c.key]='');
+  show.cues.splice(idx,0,cue);
+  pushEvent(); renderBody();
+}
+function dropOnRow(targetIdx){
+  const show=curShow(); if(!show||dragIdx==null||dragIdx===targetIdx){ dragIdx=null; return; }
+  const [moved]=show.cues.splice(dragIdx,1);
+  let ti = dragIdx<targetIdx ? targetIdx-1 : targetIdx;
+  show.cues.splice(ti,0,moved);
+  dragIdx=null;
+  pushEvent(); renderBody();
+}
+
+/* ====================== auto-track ====================== */
+function applyFollow(){
+  if(!followId) { $('#followHint').textContent=''; return; }
+  const tgt=presence.find(u=>u.id===followId);
+  if(!tgt||!tgt.pointer){ $('#followHint').textContent='Follow target disconnected — choose a target or stop following'; return; }
+  if(tgt.pointer.eventId) sel.eventId=tgt.pointer.eventId;
+  if(tgt.pointer.dayId)   sel.dayId=tgt.pointer.dayId;
+  if(tgt.pointer.showId)  sel.showId=tgt.pointer.showId;
+  setPointer(pointerIndex(tgt.pointer));
+  $('#followHint').textContent = `▶ Following ${tgt.name} (${tgt.position||''})`;
+  renderSelectors(); renderHead(); renderBody(); renderMyPtr(); afterPointer();
+}
+
+/* ====================== actions ====================== */
+function advance(dir=1){
+  if(followId)return;
+  const show=curShow(); if(!show)return;
+  reconcilePointer();
+  setPointer(Math.max(0,Math.min(show.cues.length-1,pointerIdx+dir)));
+  document.querySelectorAll('#body tr[data-idx]')[pointerIdx]?.scrollIntoView({block:'center',behavior:'smooth'});
+  pushPointer();
+}
+function addCue(){
+  const show=curShow(); if(!show)return;
+  insertCueAt(show.cues.length);
+}
+function renumberCues(){
+  const show=curShow(); if(!show||!show.cues.length){ toast('No cues to renumber'); return; }
+  if(!confirm(`Renumber all ${show.cues.length} cues in this show 1..${show.cues.length}? This overwrites the Cue # column.`)) return;
+  show.cues.forEach((c,i)=>{ c.cue=String(i+1); });
+  pushEvent(); renderBody(); toast('Cues renumbered');
+}
+
+/* ====================== keybinds ====================== */
+function codeMatch(e,binding){ return e.code===binding || (binding==='Space' && (e.key===' ' || e.key==='Spacebar')); }
+window.addEventListener('keydown',e=>{
+  if(e.key==='Escape' && e.target.isContentEditable){ e.preventDefault(); e.target.blur(); $('#goBtn').focus(); return; }
+  if(e.defaultPrevented || e.isComposing || e.target.isContentEditable || ['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)) return;
+  if($('#modalRoot').children.length) return;
+  if((e.ctrlKey||e.metaKey) && e.code==='KeyZ'){ e.preventDefault(); if(!e.repeat) send({t:e.shiftKey?'history:redo':'history:undo'}); return; }
+  if(e.ctrlKey||e.metaKey||e.altKey) return;
+  if(e.repeat){ if(Object.values(keybinds).includes(e.code)) e.preventDefault(); return; }
+  if($('#signin').classList.contains('hidden')===false) return;
+  if(followId && ['go','down','up','top','bottom','nextShow','prevShow'].some(k=>codeMatch(e,keybinds[k]))){e.preventDefault();return;}
+  if(codeMatch(e,keybinds.go)){ e.preventDefault(); advance(1); }
+  else if(codeMatch(e,keybinds.down)){ e.preventDefault(); advance(1); }
+  else if(codeMatch(e,keybinds.up)){ e.preventDefault(); advance(-1); }
+  else if(codeMatch(e,keybinds.top)){ e.preventDefault(); setPointer(0); pushPointer(); }
+  else if(codeMatch(e,keybinds.bottom)){ e.preventDefault(); setPointer((curShow()?.cues.length||1)-1); pushPointer(); }
+  else if(codeMatch(e,keybinds.addCue)){ e.preventDefault(); addCue(); }
+  else if(codeMatch(e,keybinds.delCue)){ e.preventDefault(); if(curShow()?.cues.length) deleteCue(pointerIdx); }
+  else if(codeMatch(e,keybinds.nextShow)){ e.preventDefault(); cycleShow(1); }
+  else if(codeMatch(e,keybinds.prevShow)){ e.preventDefault(); cycleShow(-1); }
+});
+function cycleShow(dir){
+  const d=curDay(); if(!d)return; const i=d.shows.findIndex(s=>s.id===sel.showId);
+  const n=d.shows[i+dir]; if(n){ sel.showId=n.id; setPointer(0); renderAll(); pushPointer(); }
+}
+
+/* ====================== modals ====================== */
+function modal(title, bodyNodes, footNodes){
+  const root=$('#modalRoot');
+  const scrim=el('div',{class:'scrim',onclick:e=>{if(e.target===scrim)root.innerHTML='';}});
+  const m=el('div',{class:'modal'}, el('h2',{},title), ...bodyNodes, el('div',{class:'row',style:'margin-top:14px'}, ...(footNodes||[])));
+  scrim.append(m); root.append(scrim);
+  return ()=>root.innerHTML='';
+}
+
+/* ---- theme engine (palettes + custom per-element colors) ---- */
+function toHex6(c){ c=String(c||'').trim();
+  if(/^#([0-9a-f]{6,8})$/i.test(c)) return '#'+c.slice(1,7).toLowerCase();
+  if(/^#([0-9a-f]{3})$/i.test(c)){ return ('#'+c[1]+c[1]+c[2]+c[2]+c[3]+c[3]).toLowerCase(); }
+  return '#888888'; }
+function hexA(hex,a){ const n=parseInt(toHex6(hex).slice(1),16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; }
+function seedFromComputed(){ const cs=getComputedStyle(document.documentElement); const o={};
+  THEME_VARS.forEach(v=>{ const raw=(cs.getPropertyValue('--'+v.key)||'').trim(); o[v.key]=toHex6(raw||DEFAULT_THEME[v.key]); }); return o; }
+function applyTheme(){
+  const root=document.documentElement;
+  if(theme==='custom' && customTheme){
+    root.setAttribute('data-theme','custom');
+    THEME_VARS.forEach(v=>{ const val=customTheme[v.key]||DEFAULT_THEME[v.key]; root.style.setProperty('--'+v.key, v.key==='cur'? hexA(val,0.30) : val); });
+  } else {
+    root.setAttribute('data-theme', theme);
+    THEME_VARS.forEach(v=>root.style.removeProperty('--'+v.key));
+  }
+}
+
+$('#btnSettings').onclick=openSettings;
+function openSettings(){
+  /* Appearance */
+  const palRow=el('div',{class:'row'});
+  const customPanel=el('div',{style:'margin-top:10px'});
+  function paintPal(){ [...palRow.children].forEach(b=>b.classList.toggle('primary', b.dataset.p===theme)); }
+  function renderCustom(){
+    customPanel.innerHTML='';
+    if(theme!=='custom') return;
+    customPanel.append(el('div',{class:'pos',style:'margin-bottom:6px'},'Set a color for each element \u2014 changes apply live and save to this device.'));
+    THEME_VARS.forEach(v=>{
+      const cur=(customTheme&&customTheme[v.key])||DEFAULT_THEME[v.key];
+      const pick=el('input',{type:'color',value:toHex6(cur)});
+      pick.addEventListener('input',e=>{ customTheme[v.key]=e.target.value; store.save('customTheme',customTheme); applyTheme(); });
+      customPanel.append(el('div',{class:'maprow'}, el('span',{class:'src'}, v.label), pick));
+    });
+    customPanel.append(el('div',{style:'margin-top:8px'},
+      el('button',{onclick:()=>{ customTheme={...DEFAULT_THEME}; store.save('customTheme',customTheme); applyTheme(); renderCustom(); }}, 'Reset custom colors to dark baseline')));
+  }
+  function selectPalette(p){
+    if(p==='custom' && !customTheme){ customTheme=seedFromComputed(); store.save('customTheme',customTheme); }
+    theme=p; store.save('theme',p); applyTheme(); paintPal(); renderCustom();
+  }
+  PALETTES.forEach(p=>{ const b=el('button',{onclick:()=>selectPalette(p)}, p==='custom'?'Custom':p); b.dataset.p=p; palRow.append(b); });
+  paintPal(); renderCustom();
+
+  /* Keybinds */
+  const kbLabels={go:'GO (advance)',up:'Previous cue',down:'Next cue',top:'Jump to top',bottom:'Jump to bottom',addCue:'Add cue',delCue:'Delete current cue',nextShow:'Next show',prevShow:'Previous show'};
+  const kbList=el('div',{});
+  Object.entries(kbLabels).forEach(([k,lab])=>{
+    const kbd=el('kbd',{}, keybinds[k]);
+    kbd.onclick=()=>{ kbd.textContent='press\u2026';
+      const grab=e=>{ e.preventDefault(); e.stopImmediatePropagation(); keybinds[k]=e.code; store.save('keybinds',keybinds); kbd.textContent=e.code; window.removeEventListener('keydown',grab,true); };
+      window.addEventListener('keydown',grab,true);
+    };
+    kbList.append(el('div',{class:'kb'}, el('span',{},lab), kbd));
+  });
+  const kbReset=el('button',{onclick:()=>{ keybinds={go:'Space',up:'ArrowUp',down:'ArrowDown',top:'Home',bottom:'End',addCue:'KeyN',delCue:'Delete',nextShow:'BracketRight',prevShow:'BracketLeft'}; store.save('keybinds',keybinds); toast('Shortcuts reset'); }}, 'Reset shortcut defaults');
+
+  /* Network adapter picker — host only (server gates /adapters to loopback) */
+  const netWrap=el('div',{});
+  const netSel=el('select',{});
+  const netInfo=el('div',{class:'pos',style:'margin-top:4px'});
+  const netNote=el('div',{class:'pos',style:'color:var(--dim);margin-top:4px'},'Pick which network the app is reachable on. Lock it to Wi-Fi to keep it off a show/Ethernet network. Takes effect next time the app starts.');
+  async function loadAdapters(){
+    let r; try{ r=await fetch('/adapters'); }catch(e){ netWrap.innerHTML=''; netWrap.append(el('div',{class:'pos'},'Could not reach the server.')); return; }
+    if(r.status===403){ netWrap.innerHTML=''; netWrap.append(el('div',{class:'pos'},'\ud83d\udd12 Network settings can only be changed on the host computer. On the machine running the app, open it at '+`http://localhost:${location.port||'7390'}`+' to manage this.')); return; }
+    const j=await r.json();
+    netSel.innerHTML=''; netSel.append(el('option',{value:''},'All adapters (default)'));
+    (j.adapters||[]).filter(a=>!a.internal).forEach(a=>{ const mask=a.cidr&&a.cidr.includes('/')?'/'+a.cidr.split('/')[1]:''; netSel.append(el('option',{value:a.address}, `${a.name} \u2014 ${a.address}${mask}${a.netmask?'  ('+a.netmask+')':''}`)); });
+    netSel.value=j.current||'';
+    const cur=(j.adapters||[]).find(a=>a.address===j.current);
+    netInfo.textContent = j.current? `Currently: ${cur?cur.name+' \u2014 ':''}${j.current}` : 'Currently: all adapters';
+    netWrap.append(netSel, netInfo, netNote);
+  }
+  netSel.onchange=()=>{ send({t:'net:setAdapter', address:netSel.value}); netInfo.textContent = (netSel.value? `Set to ${netSel.value}` : 'Set to all adapters') + ' \u2014 applies next launch'; };
+  loadAdapters();
+
+  /* Danger zone: wipe all show data (two-step) */
+  const dz=el('div',{});
+  const wipeBtn=el('button',{class:'danger'}, 'Wipe all show data\u2026');
+  const confirmWrap=el('div',{class:'hidden',style:'margin-top:8px'});
+  const typed=el('input',{placeholder:'Type WIPE to confirm'});
+  const reallyBtn=el('button',{class:'danger',onclick:()=>{ if(typed.value.trim().toUpperCase()==='WIPE'){ send({t:'data:wipe'}); selected.clear(); clip=[]; close(); toast('All show data wiped'); } else { typed.focus(); typed.select(); } }}, 'Permanently wipe everything');
+  wipeBtn.onclick=()=>{ confirmWrap.classList.toggle('hidden'); if(!confirmWrap.classList.contains('hidden')) typed.focus(); };
+  confirmWrap.append(
+    el('div',{class:'pos',style:'color:var(--warn);margin-bottom:6px'},'Deletes ALL events, days, shows, cues and notes for everyone connected. This cannot be undone.'),
+    el('div',{class:'row'}, typed, reallyBtn));
+  dz.append(wipeBtn, confirmWrap);
+
+  modal('Settings', [
+    el('h3',{},'Appearance'), palRow, customPanel,
+    el('hr',{}),
+    el('h3',{},'Keyboard shortcuts'), el('div',{class:'pos',style:'margin-bottom:4px'},'Click a key, then press the new one. Space advances cues outside text fields. Press Escape to finish editing, or enable Show Mode. Undo/Redo affects everyone’s shared show.'), kbList, el('div',{style:'margin-top:8px'}, kbReset),
+    el('hr',{}),
+    el('h3',{},'Network'), netWrap,
+    el('hr',{}),
+    el('h3',{style:'color:var(--warn)'},'Danger zone'), dz,
+  ]);
+}
+
+$('#btnCols').onclick=()=>{
+  const ev=curEvent(); if(!ev)return;
+  const list=el('div',{});
+  ev.columns.forEach((c,i)=>{
+    const row=el('div',{class:'kb'},
+      el('input',{value:c.label, onchange:e=>{c.label=e.target.value;pushEvent();}}),
+      el('label',{class:'row'},
+        el('input',{type:'checkbox', ...(hiddenCols.includes(c.key)?{}:{checked:'checked'}),
+          onchange:e=>{ if(e.target.checked) hiddenCols=hiddenCols.filter(k=>k!==c.key); else hiddenCols.push(c.key); store.save('hiddenCols',hiddenCols); renderHead();renderBody(); }}),
+        ' show'),
+      el('button',{onclick:()=>{ if(confirm('Delete column "'+c.label+'"?')){ ev.columns.splice(i,1); pushEvent(); close(); }}}, '✕'),
+    );
+    list.append(row);
+  });
+  const newKey=el('input',{placeholder:'New column label'});
+  const add=el('button',{class:'primary',onclick:()=>{
+    const label=newKey.value.trim(); if(!label)return;
+    const key=label.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'col'+ev.columns.length;
+    ev.columns.push({key,label,width:160}); pushEvent(); close();
+  }}, 'Add Column');
+  const close=modal('Columns (show/hide is per-device)',[list, el('div',{class:'row',style:'margin-top:10px'}, newKey, add)]);
+};
+
+
+
+$('#btnEvents').onclick=()=>{
+  const list=el('div',{});
+  state.events.forEach(e=>{
+    list.append(el('div',{class:'kb'},
+      el('input',{value:e.name,onchange:ev=>{e.name=ev.target.value;send({t:'event:update',event:e});}}),
+      el('button',{onclick:()=>{ if(confirm('Delete event "'+e.name+'"?')) send({t:'event:delete',id:e.id}); }}, '✕')));
+  });
+  const nm=el('input',{placeholder:'New event name'});
+  const close=modal('Events',[list, el('div',{class:'row',style:'margin-top:10px'}, nm,
+    el('button',{class:'primary',onclick:()=>{send({t:'event:create',name:nm.value||'New Event'});close();}}, 'Create'))]);
+};
+
+/* ---- upload + merge (multi-table) ---- */
+const slugc=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'');
+function autoMap(t,cols=curEvent()?.columns||[]){
+  const m=Object.create(null), taken=new Set();
+  t.columns.forEach(sc=>{ const hit=cols.find(tc=>!taken.has(tc.key)&&(tc.key===sc.key || slugc(tc.label)===slugc(sc.label) || slugc(tc.label)===slugc(sc.key)));
+    m[sc.key]= hit? hit.key : '__new__'; if(hit)taken.add(hit.key); });
+  return m;
+}
+function importValue(value, mode='text'){
+  const text=String(value??'');
+  if(mode==='text'||!text.trim()||!/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?$/i.test(text.trim()))return text;
+  const days=Number(text);
+  if(!Number.isFinite(days)||days<0||days>1e7)throw new Error('Excel time values must be non-negative and within range.');
+  const total=Math.round(days*86400), seconds=mode==='clock'?total%86400:total;
+  const hours=Math.floor(seconds/3600), minutes=Math.floor(seconds/60)%60, sec=seconds%60;
+  return `${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+}
+function attachImageToCue(idx){
+  const show=curShow(); if(!show)return; const cue=show.cues[idx]; if(!cue)return;
+  const inp=el('input',{type:'file',accept:'image/*'});
+  inp.onchange=async()=>{ const f=inp.files[0]; if(!f)return; toast('Uploading image\u2026');
+    const fd=new FormData(); fd.append('file',f);
+    try{ const r=await fetch('/attach',{method:'POST',body:fd}); const j=await r.json();
+      if(!j.ok){ toast('Attach failed: '+j.error); return; }
+      if(!Array.isArray(cue._images)) cue._images=[];
+      cue._images.push(j.id); pushEvent(); renderBody(); toast('Image attached');
+    }catch(e){ toast('Attach failed'); }
+  };
+  inp.click();
+}
+function removeCueImage(idx,id){
+  const show=curShow(); const cue=show&&show.cues[idx]; if(!cue||!cue._images)return;
+  cue._images=cue._images.filter(x=>x!==id); if(!cue._images.length) delete cue._images;
+  pushEvent(); renderBody();
+}
+function enlargeImage(id){
+  modal('Image', [ el('div',{style:'text-align:center'}, el('img',{src:'/img/'+id, style:'max-width:100%;max-height:78vh;border-radius:8px'})) ]);
+}
+function buildMerge(t,destinationColumns=curEvent()?.columns||[]){
+  const map=t._map||autoMap(t,destinationColumns);
+  const newCols=[], reserved=new Set(['id','_images','_notify','__proto__','constructor','prototype']);
+  const used=new Set([...reserved,...destinationColumns.map(c=>c.key)]), targets=new Set(), keyOf=Object.create(null);
+  t.columns.forEach(sc=>{ const tgt=map[sc.key];
+    if(tgt==='__skip__') return;
+    if(tgt==='__new__'){
+      const base=sc.key||'column'; let key=base,n=2; while(used.has(key))key=`${base}_${n++}`;
+      keyOf[sc.key]=key; used.add(key); newCols.push({key,label:sc.label});
+    } else {
+      if(reserved.has(tgt)||!destinationColumns.some(c=>c.key===tgt))throw new Error(`Choose a valid destination for ${sc.label}.`);
+      keyOf[sc.key]=tgt;
+    }
+    if(targets.has(keyOf[sc.key]))throw new Error('Two source columns target the same column. Choose separate destinations or skip one.');
+    targets.add(keyOf[sc.key]);
+  });
+  if(!targets.size)throw new Error('Choose at least one column to import.');
+  const rows=t.rows.map(r=>{ const o={id:'cue_'+Math.random().toString(16).slice(2)+Math.random().toString(16).slice(2)};
+    for(const sc of t.columns){ const tk=keyOf[sc.key]; if(tk) o[tk]=importValue(r[sc.key],t._formats?.[sc.key]); }
+    if(Array.isArray(r._images)&&r._images.length) o._images=r._images.slice();
+    if(r._notify) o._notify=r._notify;
+    return o; });
+  return { columns:newCols, rows };
+}
+function sendImport(payload){
+  return new Promise((resolve,reject)=>{
+    const socket=ws;
+    if(socket?.readyState!==1){reject(new Error('Disconnected. Reconnect before importing.'));return;}
+    const requestId='import_'+Math.random().toString(16).slice(2);
+    const finish=(error)=>{clearTimeout(timer);socket.removeEventListener('message',receive);socket.removeEventListener('close',closed);error?reject(error):resolve();};
+    const receive=e=>{const m=JSON.parse(e.data);if(m.requestId===requestId&&(m.t==='merge:result'||m.t==='error'))finish(m.t==='error'?new Error(m.message):null);};
+    const closed=()=>finish(new Error('Connection lost. Check the show before retrying; the import may have completed.'));
+    const timer=setTimeout(()=>finish(new Error('Import confirmation timed out. Check the show before retrying.')),15000);
+    socket.addEventListener('message',receive);socket.addEventListener('close',closed);
+    socket.send(JSON.stringify({t:'merge',...payload,requestId}));
+  });
+}
+$('#btnUpload').onclick=()=>{
+  const destination={...sel};
+  const destinationEvent=()=>state.events.find(e=>e.id===destination.eventId);
+  const file=el('input',{type:'file',accept:'.pdf,.docx,.xlsx,.xls,.csv,.tsv,.txt,.md'});
+  const startRow=el('input',{type:'number',min:'1',step:'1',value:'1',style:'width:90px'});
+  const hasHeader=el('input',{type:'checkbox'}); hasHeader.checked=true;
+  const status=el('div',{class:'pos'});
+  const tableSel=el('select',{style:'display:none;margin-top:8px'});
+  const mapBox=el('div',{});
+  const preview=el('div',{});
+  const warnings=el('div',{class:'pos',style:'white-space:pre-wrap;margin:8px 0'});
+  let tables=[], parseVersion=0, committing=false;
+  const rowField=el('div',{class:'field',style:'display:none'}, el('label',{},'Starting row (Excel row number, applies to all sheets)'), startRow, el('label',{},hasHeader,' This row contains column headers'));
+  const currentColumns=()=>destinationEvent()?.columns||[];
+  function renderMap(i){
+    mapBox.innerHTML=''; const t=tables[i]; if(!t)return;
+    t._map = t._map || autoMap(t,currentColumns());
+    t._formats=t._formats||{};
+    mapBox.append(el('div',{class:'pos',style:'margin:8px 0 4px'}, 'Send each imported column to:'));
+    t.columns.forEach(sc=>{
+      const selr=el('select',{'aria-label':`Destination for ${sc.label}`,onchange:e=>{ t._map[sc.key]=e.target.value; showPreview(i); }});
+      currentColumns().forEach(tc=>selr.append(el('option',{value:tc.key, ...(t._map[sc.key]===tc.key?{selected:'selected'}:{})}, tc.label)));
+      selr.append(el('option',{value:'__new__', ...(t._map[sc.key]==='__new__'?{selected:'selected'}:{})}, `+ New column \u201c${sc.label}\u201d`));
+      selr.append(el('option',{value:'__skip__', ...(t._map[sc.key]==='__skip__'?{selected:'selected'}:{})}, "Don't import"));
+      const fmt=el('select',{'aria-label':`Values for ${sc.label}`,onchange:e=>{t._formats[sc.key]=e.target.value;showPreview(i);}});
+      [['text','Preserve displayed text'],['clock','Excel decimal days → time (24h)'],['duration','Excel decimal days → duration']].forEach(([value,label])=>fmt.append(el('option',{value,...((t._formats[sc.key]||'text')===value?{selected:'selected'}:{})},label)));
+      mapBox.append(el('div',{class:'maprow'}, el('span',{class:'src'}, sc.label+' \u2192'), selr,fmt));
+    });
+  }
+  function prepare(chosen){
+    const columns=currentColumns().slice(), batches=[];
+    for(const t of chosen){const batch=buildMerge(t,columns);columns.push(...batch.columns);batches.push(batch);}
+    return {columns,batches};
+  }
+  function showPreview(i){
+    const t=tables[i]; preview.innerHTML=''; if(!t)return;
+    warnings.textContent=(t.warnings||[]).join('\n');
+    try{
+      const {columns,batches}=prepare([t]), rows=batches[0].rows;
+      const keys=rows.length?Object.keys(rows[0]).filter(k=>k!=='id'&&k!=='_images'&&k!=='_notify'):[];
+      const cols=keys.map(key=>columns.find(c=>c.key===key));
+      const tbl=el('table',{}),hr=el('tr',{},el('th',{},'Row'));
+      cols.forEach(c=>hr.append(el('th',{},c.label)));tbl.append(el('thead',{},hr));
+      const tb=el('tbody',{});
+      rows.forEach((row,index)=>{const tr=el('tr',{},el('td',{},String(t.sourceRows?.[index]??index+1)));cols.forEach(c=>tr.append(el('td',{style:'white-space:pre-wrap'},row[c.key]??'')));tb.append(tr);});tbl.append(tb);
+      preview.append(el('div',{class:'pos'},`Preview: ${rows.length} rows after mapping. Decimal-day conversions round to the nearest second; text and existing times remain unchanged.`),tbl);
+      doMerge.disabled=committing||!rows.length;
+    }catch(error){preview.append(el('div',{class:'pos'},error.message));doMerge.disabled=true;}
+    try{prepare(tables);mergeAll.disabled=committing||!tables.some(t=>t.rows.length);}catch{mergeAll.disabled=true;}
+  }
+  tableSel.onchange=()=>{ const i=+tableSel.value; renderMap(i); showPreview(i); };
+  file.onchange=async()=>{
+    const version=++parseVersion;
+    tables=[]; preview.innerHTML=''; mapBox.innerHTML=''; tableSel.innerHTML='';warnings.textContent='';
+    doMerge.disabled=true; mergeAll.disabled=true;
+    const f=file.files[0]; if(!f)return;
+    const spreadsheet=/\.(xlsx?|csv|tsv)$/i.test(f.name);
+    rowField.style.display=spreadsheet?'':'none';
+    const row=spreadsheet?Number(startRow.value):1;
+    if(!Number.isSafeInteger(row)||row<1){status.textContent='Starting row must be a positive whole number.';return;}
+    status.textContent='Parsing '+f.name+'…';
+    const fd=new FormData(); fd.append('file',f); fd.append('startRow', String(row)); fd.append('hasHeader',String(hasHeader.checked));
+    let j; try{ const r=await fetch('/upload',{method:'POST',body:fd}); j=await r.json(); }catch(err){ if(version===parseVersion) status.textContent='Upload failed: '+err; return; }
+    if(version!==parseVersion)return;
+    if(!j.ok){ status.textContent='Error: '+j.error; return; }
+    tables=(j.tables||[]).filter(t=>t.columns.length);
+    tables.forEach(t=>{t._map=autoMap(t,currentColumns());t._formats={};});
+    if(!tables.length){ status.textContent='No tabular data found in '+j.filename; return; }
+    tableSel.innerHTML='';
+    tables.forEach((t,i)=>tableSel.append(el('option',{value:i}, `${t.name||('Table '+(i+1))} — ${t.rows.length} rows × ${t.columns.length} cols`)));
+    tableSel.style.display = tables.length>1?'':'none';
+    mergeAll.style.display = tables.length>1?'':'none';
+    status.textContent=`Parsed ${tables.length} table${tables.length>1?'s':''} from ${j.filename}${spreadsheet?`, starting at ${hasHeader.checked?'header':'data'} row ${row}`:''}. Check each table's mapping and preview before merging.`;
+    doMerge.disabled=false; mergeAll.disabled=false;
+    renderMap(0); showPreview(0);
+  };
+  startRow.oninput=()=>file.onchange();
+  hasHeader.onchange=()=>file.onchange();
+  const commit=async(chosen)=>{
+    if(committing)return;
+    try{
+      const {batches}=prepare(chosen);
+      committing=true; doMerge.disabled=true;mergeAll.disabled=true;file.disabled=true;startRow.disabled=true;hasHeader.disabled=true;
+      status.textContent='Importing…';
+      await sendImport({...destination,batches});close();toast(`Imported ${batches.reduce((n,b)=>n+b.rows.length,0)} rows`);
+    }catch(error){status.textContent=error.message;}
+    finally{committing=false;file.disabled=false;startRow.disabled=false;hasHeader.disabled=false;showPreview(+tableSel.value||0);}
+  };
+  const doMerge=el('button',{class:'primary',disabled:true,onclick:()=>{
+    if(!tables.length){status.textContent='Choose a file first.';return;}
+    commit([tables[+tableSel.value||0]]);
+  }}, 'Merge selected table');
+  const mergeAll=el('button',{style:'display:none',disabled:true,onclick:()=>commit(tables)}, 'Merge all tables into this show');
+  const target=el('div',{class:'pos'}, `Will append into: ${curEvent()?.name} ▸ ${curDay()?.label} ▸ ${curShow()?.label}`);
+  const close=modal('Import document',[
+    el('p',{class:'pos'},'Supports .pdf, .docx, .xlsx/.xls, .csv/.tsv, .txt/.md. Plain lines like \u201cA2 - Mic talent\u201d split into Who + Action. Word/PDF tables and workbook sheets are parsed; memo-style docs split by day. Google Docs/Sheets: File → Download → Word/Excel, then upload.'),
+    file,
+    rowField,
+    status, tableSel, warnings, mapBox, target, el('div',{style:'max-height:320px;overflow:auto;margin-top:8px'},preview)
+  ],[doMerge, mergeAll]);
+};
+
+/* ====================== selection / clipboard ====================== */
+function newId(){ return 'cue_'+Math.random().toString(16).slice(2,10); }
+function toggleSel(id,on){ if(on)selected.add(id); else selected.delete(id); const tr=[...document.querySelectorAll('#body tr')].find(r=>r.querySelector(`td[data-cue="${id}"]`)); if(tr)tr.classList.toggle('selrow',on); updateSelBar(); }
+function updateSelBar(){ const bar=$('#selBar'); if(!bar)return; const n=selected.size;
+  $('#selCount').textContent = n? `${n} selected` : (clip.length? `${clip.length} copied`:'');
+  $('#selPaste').classList.toggle('hidden', clip.length===0);
+  ['selCopy','selDup','selDel','selClear'].forEach(id=>{ const b=$('#'+id); if(b) b.style.display = n? '' : 'none'; });
+  bar.classList.toggle('hidden', n===0 && clip.length===0);
+}
+function selectedCues(){ const show=curShow(); return show? show.cues.filter(c=>selected.has(c.id)) : []; }
+function copySel(){ const rows=selectedCues(); if(!rows.length)return; clip=rows.map(c=>{ const o=JSON.parse(JSON.stringify(c)); delete o.id; return o; }); toast(`Copied ${clip.length} row(s)`); updateSelBar(); }
+function dupSel(){ const show=curShow(); const rows=selectedCues(); if(!show||!rows.length)return;
+  let maxIdx=-1; show.cues.forEach((c,i)=>{ if(selected.has(c.id)) maxIdx=i; });
+  const copies=rows.map(c=>({ ...JSON.parse(JSON.stringify(c)), id:newId() }));
+  show.cues.splice(maxIdx+1,0,...copies); selected=new Set(copies.map(c=>c.id));
+  pushEvent(); renderBody(); }
+function delSel(){ const show=curShow(); if(!show||!selected.size)return; if(!confirm(`Delete ${selected.size} selected cue(s)?`))return;
+  show.cues=show.cues.filter(c=>!selected.has(c.id)); selected.clear();
+  reconcilePointer();
+  pushEvent(); renderBody(); pushPointer(); }
+function openPaste(){
+  if(!clip.length){ toast('Nothing copied yet'); return; }
+  const evSel=el('select',{}), daySel=el('select',{}), showSel=el('select',{});
+  state.events.forEach(e=>evSel.append(el('option',{value:e.id},e.name))); evSel.value=sel.eventId;
+  function fillDays(){ const ev=state.events.find(e=>e.id===evSel.value); daySel.innerHTML=''; ev?.days.forEach(d=>daySel.append(el('option',{value:d.id},d.label))); fillShows(); }
+  function fillShows(){ const ev=state.events.find(e=>e.id===evSel.value); const d=ev?.days.find(x=>x.id===daySel.value); showSel.innerHTML=''; d?.shows.forEach(sh=>showSel.append(el('option',{value:sh.id},sh.label))); }
+  evSel.onchange=fillDays; daySel.onchange=fillShows; fillDays();
+  const go=el('button',{class:'primary',onclick:()=>{
+    const ev=state.events.find(e=>e.id===evSel.value); const d=ev?.days.find(x=>x.id===daySel.value); const sh=d?.shows.find(s=>s.id===showSel.value);
+    if(!sh){return;}
+    const keys=new Set(); clip.forEach(c=>Object.keys(c).forEach(k=>{ if(k!=='id'&&k!=='_notify') keys.add(k); }));
+    const have=new Set(ev.columns.map(c=>c.key));
+    keys.forEach(k=>{ if(!have.has(k)) ev.columns.push({key:k,label:k.charAt(0).toUpperCase()+k.slice(1),width:160}); });
+    const rows=clip.map(c=>({ ...JSON.parse(JSON.stringify(c)), id:newId() }));
+    sh.cues.push(...rows); send({t:'event:update',event:ev}); close(); toast(`Pasted ${rows.length} row(s) into ${sh.label}`);
+  }}, 'Paste here');
+  const close=modal(`Paste ${clip.length} row(s) into…`, [
+    el('div',{class:'field'}, el('label',{},'Event'), evSel),
+    el('div',{class:'field'}, el('label',{},'Day'), daySel),
+    el('div',{class:'field'}, el('label',{},'Show'), showSel),
+  ], [go]);
+}
+
+/* ====================== show mode ====================== */
+function applyShowMode(){
+  $('#app').classList.toggle('showmode', showMode);
+  const b=$('#btnShow'); if(b){ b.classList.toggle('primary', showMode); b.setAttribute('aria-pressed',String(showMode)); b.textContent = showMode? 'Show Mode: ON' : 'Show Mode'; }
+  renderBody(); if(showMode) scrollToActive();
+}
+
+/* ====================== mobile ====================== */
+function applyMobile(){ document.body.classList.toggle('mobile', mobile); const t=$('#tglMobile'); if(t) t.checked=mobile; }
+
+/* ====================== visual cue notifications ====================== */
+function notifyTargetsMe(n){
+  const t=String(n.target||'all').toLowerCase().trim();
+  if(!t || t==='all' || t==='everyone') return true;
+  const mine=[me.position||'', me.name||''].map(x=>x.toLowerCase()).filter(Boolean);
+  return mine.some(x=> x===t || x.includes(t) || t.includes(x));
+}
+function checkNotifications(ai){
+  const show=curShow(); if(!show)return;
+  show.cues.forEach((cue,idx)=>{
+    const n=cue._notify; if(!n||!n.text) return;
+    if(!notifyTargetsMe(n)) return;
+    if(idx===ai){ const k=cue.id+':go'; if(!firedNotes.has(k)){ firedNotes.add(k); showNotif('GO',n.text,cue); } }
+    else if((n.lead>0) && ai>=idx-n.lead && ai<idx){ const k=cue.id+':sb'; if(!firedNotes.has(k)){ firedNotes.add(k); showNotif('STANDBY',n.text,cue); } }
+  });
+}
+function showNotif(kind, text, cue){
+  const wrap=$('#notifs'); if(!wrap)return;
+  const labelCol=(curEvent()?.columns||[]).find(c=>c.key==='action')||{key:'action'};
+  const sub = cue ? (cue[labelCol.key]||cue.cue||'') : '';
+  const n=el('div',{class:'notif '+(kind==='GO'?'go':'sb')},
+    el('div',{class:'nk'}, kind==='GO'?'\u25b6 GO':'\u23f1 STBY'),
+    el('div',{class:'nt'}, text),
+    el('div',{class:'na'}, sub),
+    el('button',{class:'nx',title:'Dismiss',onclick:()=>n.remove()}, '\u2715'));
+  wrap.append(n);
+  setTimeout(()=>{ n.classList.add('out'); setTimeout(()=>n.remove(),400); }, kind==='GO'?10000:20000);
+}
+function editNotify(idx){
+  const show=curShow(); if(!show)return; const cue=show.cues[idx]; const n=cue._notify||{text:'',target:'all',lead:1};
+  const txt=el('input',{value:n.text||'', placeholder:'e.g. Standby to mic the talent'});
+  const tgt=el('input',{value:n.target||'all', placeholder:'all, or a position e.g. A2', list:'positions'});
+  const lead=el('input',{type:'number', min:'0', max:'20', value:String(n.lead??1), style:'width:80px'});
+  const save=el('button',{class:'primary',onclick:()=>{
+    const t=txt.value.trim();
+    if(!t){ delete cue._notify; } else { cue._notify={ text:t, target:(tgt.value.trim()||'all'), lead:Math.max(0,parseInt(lead.value)||0) }; }
+    firedNotes.clear(); pushEvent(); renderBody(); close();
+  }}, 'Save');
+  const rem=el('button',{onclick:()=>{ delete cue._notify; pushEvent(); renderBody(); close(); }}, 'Remove');
+  const close=modal('Cue notification', [
+    el('p',{class:'pos'},'Visual pop-up shown to the targeted operator(s) as the live cue reaches this row. Standby fires the set number of cues earlier.'),
+    el('div',{class:'field'}, el('label',{},'Message'), txt),
+    el('div',{class:'field'}, el('label',{},'Send to (All, or match a position/name)'), tgt),
+    el('div',{class:'field'}, el('label',{},'Standby lead — cues before (0 = only at GO)'), lead),
+  ], [save, rem]);
+}
+
+/* ====================== show notes (sidebar) ====================== */
+function renderSideNotes(){
+  const box=$('#sideNotes'); if(!box)return; box.innerHTML='';
+  const notes=[...((curEvent()?.notes)||[])].sort((a,b)=>b.ts-a.ts).slice(0,10);
+  if(!notes.length){ box.append(el('div',{class:'pos'},'No notes yet.')); return; }
+  notes.forEach(n=>{
+    box.append(el('div',{class:'snote'},
+      el('span',{class:'dot',style:`background:${n.color}`}),
+      el('span',{}, el('strong',{}, n.author||'Anon'), ' ', el('span',{class:'pos'}, new Date(n.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}))),
+      el('div',{style:'flex-basis:100%;white-space:pre-wrap'}, n.text)));
+  });
+}
+
+function toast(msg){ const t=el('div',{class:'toast'},msg); document.body.append(t); setTimeout(()=>t.remove(),2200); }
+
+/* ---- Show Notes ---- */
+$('#btnNotes').onclick=()=>openNotes();
+function openNotes(){
+  const ev=curEvent(); if(!ev)return;
+  const feed=el('div',{style:'max-height:46vh;overflow:auto;margin:6px 0'});
+  function renderFeed(){
+    if(!feed.isConnected){ notesRender=null; return; }
+    feed.innerHTML='';
+    const notes=[...((curEvent()?.notes)||[])].sort((a,b)=>b.ts-a.ts);
+    if(!notes.length){ feed.append(el('div',{class:'pos'},'No notes yet — post the first one for the team.')); return; }
+    notes.forEach(n=>{
+      feed.append(el('div',{class:'noteitem'},
+        el('div',{class:'row',style:'gap:6px;align-items:center'},
+          el('span',{class:'dot',style:`background:${n.color}`}),
+          el('strong',{}, n.author||'Anon'),
+          el('span',{class:'pos'}, new Date(n.ts).toLocaleString()),
+          el('button',{class:'mini',style:'margin-left:auto',title:'Delete note',onclick:()=>{ if(confirm('Delete this note?')) send({t:'note:delete', eventId:ev.id, noteId:n.id}); }}, '\u2715')),
+        el('div',{style:'white-space:pre-wrap;margin-top:4px'}, n.text)));
+    });
+  }
+  const ta=el('textarea',{rows:'3',placeholder:'Write a note for the whole team (e.g. \u201cDoors at 7, hold band until SM call\u201d)…'});
+  const post=el('button',{class:'primary',onclick:()=>{ const t=ta.value.trim(); if(!t)return; send({t:'note:add', eventId:ev.id, text:t}); ta.value=''; }}, 'Post note');
+  ta.addEventListener('keydown',e=>{ if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){ e.preventDefault(); post.click(); } });
+  notesRender=renderFeed; renderFeed();
+  const close=modal('Show Notes \u2014 '+ev.name, [feed, el('div',{class:'field'}, el('label',{},'New note (Ctrl/Cmd+Enter to post)'), ta)], [post]);
+}
+
+function renderHistory(){
+  for(const [id,enabled,label] of [['undoBtn',historyState.canUndo,historyState.undoLabel],['redoBtn',historyState.canRedo,historyState.redoLabel]]){
+    const b=$('#'+id); b.disabled=!enabled; b.title=enabled?`Shared history: ${label||'latest edit'}`:'No shared edit available';
+  }
+}
+/* ====================== wiring ====================== */
+$('#undoBtn').onclick=()=>send({t:'history:undo'});
+$('#redoBtn').onclick=()=>send({t:'history:redo'});
+$('#selEvent').onchange=e=>{sel.eventId=e.target.value;sel.dayId=null;sel.showId=null;selected.clear();firedNotes.clear();ensureSel();setPointer(0);renderAll();pushPointer();};
+$('#selDay').onchange=e=>{sel.dayId=e.target.value;sel.showId=null;selected.clear();firedNotes.clear();ensureSel();setPointer(0);renderAll();pushPointer();};
+$('#selShow').onchange=e=>{sel.showId=e.target.value;selected.clear();firedNotes.clear();setPointer(0);renderAll();pushPointer();};
+$('#addDay').onclick=()=>{const ev=curEvent();ev.days.push({id:'day_'+Math.random().toString(16).slice(2,10),label:'Day '+(ev.days.length+1),date:'',shows:[{id:'show_'+Math.random().toString(16).slice(2,10),label:'Show 1',cues:[]}]});pushEvent();};
+$('#addShow').onclick=()=>{const d=curDay();d.shows.push({id:'show_'+Math.random().toString(16).slice(2,10),label:'Show '+(d.shows.length+1),cues:[]});pushEvent();};
+$('#addCue').onclick=addCue;
+$('#renumber').onclick=renumberCues;
+$('#goBtn').onclick=()=>{advance(1); $('#goBtn').focus();};
+$('#followSel').onchange=e=>{ followId=e.target.value; firedNotes.clear(); send({t:'follow',targetId:followId}); applyFollow(); };
+$('#btnShow').onclick=()=>{ showMode=!showMode; store.save('showMode',showMode); applyShowMode(); $('#goBtn').focus(); };
+$('#tglMobile').onchange=e=>{ mobile=e.target.checked; store.save('mobile',mobile); applyMobile(); };
+$('#workspaceTools').addEventListener('click',e=>{if(e.target.closest('button'))$('#workspaceTools').open=false;});
+document.addEventListener('click',e=>{if(!e.target.closest('#workspaceTools'))$('#workspaceTools').open=false;});
+$('#workspaceTools').addEventListener('keydown',e=>{if(e.key==='Escape'){$('#workspaceTools').open=false;$('#workspaceTools summary').focus();}});
+$('#selCopy').onclick=copySel;
+$('#selDup').onclick=dupSel;
+$('#selDel').onclick=delSel;
+$('#selPaste').onclick=openPaste;
+$('#selClear').onclick=()=>{ selected.clear(); renderBody(); };
+$('#sideNoteAdd').onclick=()=>openNotes();
+applyMobile(); applyShowMode();
+
+/* ====================== sign-in ====================== */
+function onDenied(reason){
+  try{ ws.close(); }catch{}
+  $('#app').classList.add('hidden'); $('#goBtn').classList.add('hidden');
+  $('#signin').classList.remove('hidden');
+  $('#codeErr').textContent = reason || 'Access denied';
+}
+(function initSignin(){
+  const pick=$('#colorPick');
+  COLORS.forEach(c=>{
+    const s=el('div',{class:'swatch'+(me.color===c?' sel':''),style:`background:${c}`,onclick:()=>{
+      me.color=c; pick.querySelectorAll('.swatch').forEach(x=>x.classList.remove('sel')); s.classList.add('sel');
+    }});
+    pick.append(s);
+  });
+  $('#inName').value=me.name; $('#inPos').value=me.position;
+  $('#inPort').value=location.port||'(default)';
+  $('#doJoin').onclick=()=>{
+    me.name=$('#inName').value.trim()||'Anon'; me.position=$('#inPos').value.trim();
+    joinCode=$('#inCode').value.trim();
+    store.save('me',me);
+    $('#codeErr').textContent='';
+    $('#signin').classList.add('hidden'); $('#app').classList.remove('hidden'); $('#goBtn').classList.remove('hidden');
+    connect();
+  };
+  $('#inName').addEventListener('keydown',e=>{if(e.key==='Enter')$('#doJoin').click();});
+  $('#inCode').addEventListener('keydown',e=>{if(e.key==='Enter')$('#doJoin').click();});
+})();
+</script>
+</body>
+</html>

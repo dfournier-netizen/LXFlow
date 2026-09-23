@@ -1,0 +1,23 @@
+# Installed dependencies and generated release artifacts
+node_modules/
+/build/
+/dist/
+coverage/
+*.log
+
+# Local show data, recovery files, images, and host configuration
+runofshow-data.json*
+runofshow-config.json*
+runofshow-images/
+.env
+.env.*
+!.env.example
+
+# Local editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Unused v1 client retained locally; active source is public/index.html
+/index.html

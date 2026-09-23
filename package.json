@@ -1,0 +1,32 @@
+{
+  "name": "lxflow",
+  "version": "1.3.0",
+  "description": "Locally-hosted real-time run-of-show / cue tracking server for live production",
+  "type": "module",
+  "bin": "build/server.cjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.mjs",
+    "bundle": "node build.mjs",
+    "dist": "node build.mjs && node scripts/package.mjs",
+    "dist:launchers": "node build.mjs && node scripts/package.mjs --launchers-only",
+    "test:packaging": "node scripts/smoke-package.mjs"
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "0.8.13",
+    "formidable": "^3.5.2",
+    "mammoth": "^1.8.0",
+    "pngjs": "^7.0.0",
+    "unpdf": "^1.6.2",
+    "ws": "^8.18.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "6.22.0",
+    "esbuild": "^0.23.0",
+    "yazl": "3.3.1"
+  },
+  "pkg": {
+    "assets": []
+  }
+}
