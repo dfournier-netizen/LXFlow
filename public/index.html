@@ -186,6 +186,12 @@ textarea{background:var(--panel);color:inherit;border:1px solid var(--line);bord
 .noteitem .pos{font-size:11px}
 .maprow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0}
 .maprow .src{color:var(--dim);font-size:13px}
+.column-editor{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:14px 0;border-bottom:1px solid var(--line)}
+.column-editor .column-name{flex:1 1 180px;min-width:0;width:100%}
+.column-editor input[type=color]{height:44px;width:48px}
+#grid th.column-colored{border-top:4px solid var(--column-color);background-image:linear-gradient(var(--column-tint),var(--column-tint))}
+#grid td.column-colored{background-image:linear-gradient(var(--column-tint),var(--column-tint));border-left:3px solid var(--column-color)}
+body.mobile #grid td.column-colored{border-left:3px solid var(--column-color);border-radius:6px}
 /* Tablet workspace: persistent controls, spacious touch targets, quiet surfaces. */
 button,input,select{min-height:44px}
 button{padding:10px 16px;font-weight:550;transition:background .15s,border-color .15s}
@@ -276,7 +282,7 @@ body.mobile #app.showmode #grid td[data-key]:empty{display:none}
 <div id="app" class="hidden">
   <header>
     <h1>LXFlow</h1>
-    <span class="version" title="Tablet interface update">1.3.0</span>
+    <span class="version" title="Column color coding">1.4.0</span>
     <span class="spacer"></span>
     <span id="meName" class="pos"></span>
     <label class="switch" title="Switch between cue cards and table"><input type="checkbox" id="tglMobile"><span class="track"><span class="knob"></span></span><span class="slbl">Cards</span></label>
@@ -473,6 +479,14 @@ function scrollToActive(){ document.querySelectorAll('#body tr[data-idx]')[activ
 
 /* ====================== render ====================== */
 function visibleCols(){ return (curEvent()?.columns||[]).filter(c=>!hiddenCols.includes(c.key)); }
+function colorColumn(node,column){
+  if(/^#[0-9a-f]{6}$/i.test(column.color||'')){
+    node.classList.add('column-colored');
+    node.style.setProperty('--column-color',column.color);
+    node.style.setProperty('--column-tint',column.color+'18');
+  }
+  return node;
+}
 function lockOf(cueId,colKey){ return locks.find(l=>l.cueId===cueId && l.colKey===colKey && l.showId===sel.showId); }
 
 function renderAll(){ reconcilePointer(); renderSelectors(); renderHead(); renderBody(); renderPresence(); renderMyPtr(); updateNotesBadge(); renderSideNotes(); }
@@ -496,7 +510,7 @@ function renderHead(){
   all.addEventListener('change',e=>{ const show=curShow(); if(!show)return; if(e.target.checked) show.cues.forEach(c=>selected.add(c.id)); else selected.clear(); renderBody(); });
   head.append(el('th',{class:'selcell'}, all));
   head.append(el('th',{class:'rowh'}, ''));
-  visibleCols().forEach(c=>head.append(el('th',{style:`min-width:${c.width||120}px`}, c.label)));
+  visibleCols().forEach(c=>head.append(colorColumn(el('th',{style:`min-width:${c.width||120}px`}, c.label),c)));
   head.append(el('th',{}, 'On Cue'));
   head.append(el('th',{class:'rowact'}, ''));            // row actions
 }
@@ -529,7 +543,7 @@ function renderBody(){
       const isCueNo = c.key==='cue';
       const hasVal = cue[c.key] && String(cue[c.key]).trim()!=='';
       const shown = (isCueNo && !hasVal) ? String(idx+1) : (cue[c.key]||'');
-      const td=el('td',{ 'data-key':c.key, 'data-cue':cue.id, 'data-label':c.label }, shown);
+      const td=colorColumn(el('td',{ 'data-key':c.key, 'data-cue':cue.id, 'data-label':c.label }, shown),c);
       td.addEventListener('focus',()=>cellFocus(cue.id,c.key));
       td.addEventListener('input',ev=>{ cue[c.key]=ev.target.textContent; });
       td.addEventListener('blur',()=>cellBlur(cue.id,c.key));
@@ -842,25 +856,38 @@ function openSettings(){
 
 $('#btnCols').onclick=()=>{
   const ev=curEvent(); if(!ev)return;
+  const latest=()=>state.events.find(event=>event.id===ev.id);
+  function updateColumn(key,change){
+    const event=latest(), column=event?.columns.find(col=>col.key===key);
+    if(!column){toast('This column is no longer available. Reopen Columns.');return;}
+    change(column); send({t:'event:update',event}); renderHead();renderBody();
+  }
   const list=el('div',{});
   ev.columns.forEach((c,i)=>{
-    const row=el('div',{class:'kb'},
-      el('input',{value:c.label, onchange:e=>{c.label=e.target.value;pushEvent();}}),
+    const color=el('input',{type:'color',value:/^#[0-9a-f]{6}$/i.test(c.color||'')?c.color:'#4f8cff','aria-label':'Color for '+c.label,
+      onchange:e=>updateColumn(c.key,col=>{col.color=e.target.value;})});
+    const row=el('div',{class:'column-editor'},
+      el('input',{class:'column-name',value:c.label,'aria-label':'Column name: '+c.label, onchange:e=>updateColumn(c.key,col=>{col.label=e.target.value;})}),
+      el('label',{class:'row'},'Color',color),
+      el('button',{title:'Remove color from '+c.label,onclick:()=>{updateColumn(c.key,col=>{delete col.color;});color.value='#4f8cff';}},'No color'),
       el('label',{class:'row'},
         el('input',{type:'checkbox', ...(hiddenCols.includes(c.key)?{}:{checked:'checked'}),
           onchange:e=>{ if(e.target.checked) hiddenCols=hiddenCols.filter(k=>k!==c.key); else hiddenCols.push(c.key); store.save('hiddenCols',hiddenCols); renderHead();renderBody(); }}),
         ' show'),
-      el('button',{onclick:()=>{ if(confirm('Delete column "'+c.label+'"?')){ ev.columns.splice(i,1); pushEvent(); close(); }}}, '✕'),
+      el('button',{'aria-label':'Delete column '+c.label,onclick:()=>{ if(confirm('Delete column "'+c.label+'"?')){ const event=latest();if(event){event.columns=event.columns.filter(col=>col.key!==c.key);send({t:'event:update',event});} close(); }}}, '✕'),
     );
     list.append(row);
   });
   const newKey=el('input',{placeholder:'New column label'});
   const add=el('button',{class:'primary',onclick:()=>{
     const label=newKey.value.trim(); if(!label)return;
-    const key=label.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'col'+ev.columns.length;
-    ev.columns.push({key,label,width:160}); pushEvent(); close();
+    const event=latest();if(!event)return;
+    const base=label.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')||'col';
+    const used=new Set(['id','_images','_notify','__proto__','constructor','prototype',...event.columns.map(col=>col.key)]);
+    let key=base,n=2;while(used.has(key))key=base+'_'+n++;
+    event.columns.push({key,label,width:160}); send({t:'event:update',event}); close();
   }}, 'Add Column');
-  const close=modal('Columns (show/hide is per-device)',[list, el('div',{class:'row',style:'margin-top:10px'}, newKey, add)]);
+  const close=modal('Columns',[el('p',{class:'hint'},'Color columns by department or any grouping. Names and colors are shared across this event; show/hide applies only to this device.'),list, el('div',{class:'row',style:'margin-top:10px'}, newKey, add)],[el('button',{onclick:()=>close()},'Done')]);
 };
 
 
