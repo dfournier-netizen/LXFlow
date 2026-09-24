@@ -137,7 +137,7 @@ The **Network adapter** picker in Settings is restricted to the **host** — onl
 
 LXFlow retains the legacy `runofshow-*` data filenames and `ROS_*` environment variables so existing shows and settings remain compatible. The source folder is still named `runofshow`.
 
-## Column colors — version 1.4.0
+## Column colors — version 1.4.1
 
 Open **Tools → Columns** and choose a color beside any column. Headers and cells get
 a color accent and light tint in both table and Cards views. Use **No color** to reset.
@@ -155,7 +155,7 @@ Controls have larger touch targets, visible keyboard focus, and responsive spaci
 
 ## Import reliability — included since version 1.2.0
 
-Use the new LXFlow packages and check the **1.4.0** badge. Older retained Run of Show
+Use the new LXFlow packages and check the **1.4.1** badge. Older retained Run of Show
 packages have an outdated spreadsheet parser that can expose Excel times as decimals.
 Reimport the original workbook to replace previously affected imports.
 

@@ -354,7 +354,7 @@ data/images/configuration and recovery files. The unused root `index.html` is re
 locally and ignored; the active client is `public/index.html`.
 The baseline is committed locally; pushing to GitHub is a separate action.
 
-### Column colors — LXFlow 1.4.0, 2026-09-23
+### Column colors — LXFlow 1.4.1, 2026-09-23
 
 - Tools → Columns supports optional per-column colors and No color reset. Colors
   live in event.columns[].color, share through existing event updates, persist to disk,
@@ -374,3 +374,10 @@ department colors remain clear on dark and light surfaces while text and active-
 highlighting stay readable. The change is in `public/index.html`; the 26-test suite
 passes. It is ready to commit on `Column-Color-Code` once Git metadata permissions
 are restored.
+
+### Column surface stacking fix — LXFlow 1.4.1
+
+Cards now render their base surface on a behind-layer pseudo-element. Column cells sit
+above it with a stronger translucent fill, so each department color reads as its own
+surface instead of looking like it is behind a tinted card. The table header and cells
+use the same explicit cell-level backgrounds. The active-cue outline remains on top.
