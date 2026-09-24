@@ -137,7 +137,15 @@ The **Network adapter** picker in Settings is restricted to the **host** — onl
 
 LXFlow retains the legacy `runofshow-*` data filenames and `ROS_*` environment variables so existing shows and settings remain compatible. The source folder is still named `runofshow`.
 
-## Tablet interface — version 1.3.0
+## Column colors — version 1.4.0
+
+Open **Tools → Columns** and choose a color beside any column. Headers and cells get
+a color accent and light tint in both table and Cards views. Use **No color** to reset.
+Colors are shared across the event, saved with the show data, and support Undo/Redo.
+Use matching colors for department columns such as Audio, Video, and Lighting, or any
+other grouping. Colors apply to entire columns, not rules based on individual cell values.
+
+## Tablet interface — included since version 1.3.0
 
 The main toolbar keeps Cards, Undo/Redo, and Show Mode within reach. Open **Tools**
 for Import Doc, Columns, Notes, Events, and Settings. **Cards** switches between the
@@ -147,7 +155,7 @@ Controls have larger touch targets, visible keyboard focus, and responsive spaci
 
 ## Import reliability — included since version 1.2.0
 
-Use the new LXFlow packages and check the **1.3.0** badge. Older retained Run of Show
+Use the new LXFlow packages and check the **1.4.0** badge. Older retained Run of Show
 packages have an outdated spreadsheet parser that can expose Excel times as decimals.
 Reimport the original workbook to replace previously affected imports.
 

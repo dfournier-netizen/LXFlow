@@ -36,7 +36,9 @@ test('shared persistent undo/redo, pointer identity, wipe images and backup reco
     let state=await app.send({t:'event:create',name:'Test'});
     let ev=state.events.find(e=>e.name==='Test');
     ev.days[0].shows[0].cues=[{id:'a',action:'A'},{id:'b',action:'B'}];
+    ev.columns.find(c=>c.key==='action').color='#ff9933';
     state=await app.send({t:'event:update',event:ev});
+    assert.equal(state.events.find(e=>e.id===ev.id).columns.find(c=>c.key==='action').color,'#ff9933');
     const selection={eventId:ev.id,dayId:ev.days[0].id,showId:ev.days[0].shows[0].id};
     const invalid=structuredClone(ev); invalid.days[0].shows=[null];
     const rejected=await app.send({t:'event:update',event:invalid},'error');
@@ -67,6 +69,7 @@ test('shared persistent undo/redo, pointer identity, wipe images and backup reco
     state=await app.send({t:'history:undo'});
     assert.ok(state.events.some(e=>e.id===ev.id));
     assert.equal(state.history.canRedo,true);
+    assert.equal(state.events.find(e=>e.id===ev.id).columns.find(c=>c.key==='action').color,'#ff9933','column color survives saved history, restart, and undo');
     await app.send({t:'event:create',name:'Branch'});
     assert.equal(app.messages.find(m=>m.t==='state').history.canRedo,false);
     await app.close(); app=null;

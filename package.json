@@ -1,6 +1,6 @@
 {
   "name": "lxflow",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Locally-hosted real-time run-of-show / cue tracking server for live production",
   "type": "module",
   "bin": "build/server.cjs",

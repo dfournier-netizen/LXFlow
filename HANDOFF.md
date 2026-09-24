@@ -353,3 +353,16 @@ baseline. `.gitignore` excludes dependencies, generated builds/releases, runtime
 data/images/configuration and recovery files. The unused root `index.html` is retained
 locally and ignored; the active client is `public/index.html`.
 The baseline is committed locally; pushing to GitHub is a separate action.
+
+### Column colors — LXFlow 1.4.0, 2026-09-23
+
+- Tools → Columns supports optional per-column colors and No color reset. Colors
+  live in event.columns[].color, share through existing event updates, persist to disk,
+  and participate in shared undo/redo. No data migration is needed.
+- Headers get a colored edge and tint; cells get a subtle tint and side stripe in table
+  and Cards views. Text keeps theme colors and active-cue highlighting remains visible.
+- Column editor updates resolve the current event/column by ID/key to avoid losing
+  subsequent edits after a server refresh. New column keys avoid collisions/reserved IDs.
+- Browser verified multiple color edits, persistence across reload, reset, and Undo.
+  Existing server-history regression now checks color persistence after restart/undo.
+- This is whole-column styling; conditional colors based on cell contents remain future work.
