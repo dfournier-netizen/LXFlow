@@ -366,3 +366,11 @@ The baseline is committed locally; pushing to GitHub is a separate action.
 - Browser verified multiple color edits, persistence across reload, reset, and Undo.
   Existing server-history regression now checks color persistence after restart/undo.
 - This is whole-column styling; conditional colors based on cell contents remain future work.
+
+### Column color contrast adjustment — 2026-09-23
+
+Raised the translucent column tint from 9% (`18` alpha) to 22% (`38` alpha) so
+department colors remain clear on dark and light surfaces while text and active-cue
+highlighting stay readable. The change is in `public/index.html`; the 26-test suite
+passes. It is ready to commit on `Column-Color-Code` once Git metadata permissions
+are restored.
