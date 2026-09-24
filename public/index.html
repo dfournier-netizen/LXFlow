@@ -189,9 +189,13 @@ textarea{background:var(--panel);color:inherit;border:1px solid var(--line);bord
 .column-editor{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:14px 0;border-bottom:1px solid var(--line)}
 .column-editor .column-name{flex:1 1 180px;min-width:0;width:100%}
 .column-editor input[type=color]{height:44px;width:48px}
-#grid th.column-colored{border-top:4px solid var(--column-color);background-image:linear-gradient(var(--column-tint),var(--column-tint))}
-#grid td.column-colored{background-image:linear-gradient(var(--column-tint),var(--column-tint));border-left:3px solid var(--column-color)}
-body.mobile #grid td.column-colored{border-left:3px solid var(--column-color);border-radius:6px}
+#grid th.column-colored{border-top:4px solid var(--column-color);background-color:color-mix(in srgb,var(--column-color) 22%,var(--panel2));background-image:none}
+#grid td.column-colored{background-color:color-mix(in srgb,var(--column-color) 26%,transparent);background-image:none;border-left:3px solid var(--column-color);position:relative;z-index:1}
+body.mobile tbody tr{position:relative;isolation:isolate;background:transparent!important}
+body.mobile tbody tr:before{content:'';position:absolute;inset:0;background:var(--row);border:1px solid var(--line);border-radius:inherit;z-index:0;pointer-events:none}
+body.mobile tbody tr.cur:before{background:var(--cur)}
+body.mobile tbody tr>td{position:relative;z-index:1}
+body.mobile #grid td.column-colored{border-left:3px solid var(--column-color);border-radius:6px;background-color:color-mix(in srgb,var(--column-color) 30%,transparent)}
 /* Tablet workspace: persistent controls, spacious touch targets, quiet surfaces. */
 button,input,select{min-height:44px}
 button{padding:10px 16px;font-weight:550;transition:background .15s,border-color .15s}
@@ -282,7 +286,7 @@ body.mobile #app.showmode #grid td[data-key]:empty{display:none}
 <div id="app" class="hidden">
   <header>
     <h1>LXFlow</h1>
-    <span class="version" title="Column color coding">1.4.0</span>
+    <span class="version" title="Column color coding">1.4.1</span>
     <span class="spacer"></span>
     <span id="meName" class="pos"></span>
     <label class="switch" title="Switch between cue cards and table"><input type="checkbox" id="tglMobile"><span class="track"><span class="knob"></span></span><span class="slbl">Cards</span></label>
