@@ -483,7 +483,8 @@ function colorColumn(node,column){
   if(/^#[0-9a-f]{6}$/i.test(column.color||'')){
     node.classList.add('column-colored');
     node.style.setProperty('--column-color',column.color);
-    node.style.setProperty('--column-tint',column.color+'18');
+    // Keep the tint translucent, but strong enough to distinguish adjacent departments.
+    node.style.setProperty('--column-tint',column.color+'38');
   }
   return node;
 }
