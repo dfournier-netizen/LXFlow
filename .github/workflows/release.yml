@@ -1,0 +1,45 @@
+# Builds LXFlow and publishes a GitHub Release when a v* tag is pushed
+# (e.g. v1.4.1). Pull requests that change this file run the same build
+# without publishing, so the pipeline is proven before a tag relies on it.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths: ['.github/workflows/release.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Windows so the standalone .exe smoke test (npm run test:packaging) can run.
+    runs-on: windows-latest
+    steps:
+      # Keep LF line endings so the bundle matches the repository bytes.
+      - run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist
+      - run: npm run test:packaging
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          dist/*.zip dist/SHA256SUMS.txt
+          --title "LXFlow $GITHUB_REF_NAME"
+          --generate-notes
+          --verify-tag
