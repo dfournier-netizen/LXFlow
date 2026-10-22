@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+const html = fs.readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+const start = html.indexOf('function renderCueAck(){');
+const code = html.slice(start, html.indexOf('\n}', start) + 2);
+test('screen ACK shows only while a light at my own position is flashing', () => {
+  let hidden = true;
+  const ack = { classList: { toggle: (_c, v) => { hidden = v; } } };
+  const app = { classList: { contains: () => false } };
+  const ctx = vm.createContext({ me: { position: 'LX ' }, cueLights: { lights: [] }, $: s => s === '#cueAck' ? ack : app });
+  vm.runInContext(code, ctx);
+  const show = lights => { ctx.cueLights = { lights }; vm.runInContext('renderCueAck()', ctx); return !hidden; };
+  assert.equal(show([{ online: true, state: 'standby-flash', position: 'lx' }]), true);
+  assert.equal(show([{ online: true, state: 'standby', position: 'LX' }]), false, 'acked/steady');
+  assert.equal(show([{ online: true, state: 'standby-flash', position: 'Video' }]), false, 'someone else');
+  assert.equal(show([{ online: true, state: 'standby-flash', position: 'all' }]), false, '"all" lights ack from their own button');
+  assert.equal(show([{ online: false, state: 'standby-flash', position: 'LX' }]), false, 'offline');
+  ctx.me.position = '';
+  assert.equal(show([{ online: true, state: 'standby-flash', position: '' }]), false, 'no position, no ack');
+});

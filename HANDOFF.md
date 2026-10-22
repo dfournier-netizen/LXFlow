@@ -135,7 +135,10 @@ debounces the atomic write. Images: `saveImageBuf(buf,ext)` → id; served from 
 imported/pasted rows), `note:add`/`note:delete`, `data:wipe`, `net:setAdapter`
 (**host only** — ignored unless the socket is loopback).
 Server → client: `hello`, `state`, `presence`, `locks`, `joined`, `denied`,
-`lockDenied`, `followAck`, `net:set`.
+`lockDenied`, `followAck`, `net:set`, `cuelights` (per socket, with `host` flag).
+Cue lights: client → server `cuelight:ack` (acks lights at the sender's position) and
+`cuelight:set` (**host only**; `op` = `caller` | `style` | `light` | `identify` | `forget`).
+ESP32 lights use a separate socket path, `/cuelight` (see `cuelights.js`).
 
 ### Client (`public/index.html`)
 Vanilla JS module, no framework. One `el()` DOM helper. Key pieces: `connect()` WS loop;
@@ -381,3 +384,22 @@ Cards now render their base surface on a behind-layer pseudo-element. Column cel
 above it with a stronger translucent fill, so each department color reads as its own
 surface instead of looking like it is behind a tinted card. The table header and cells
 use the same explicit cell-level backgrounds. The active-cue outline remains on top.
+
+### Cue lights (ESP32) — 2026-10-22
+
+- `cuelights.js` (new): light registry, caller-driven standby/GO, per-light ack, standby
+  style, UDP discovery (`LXFLOW_DISCOVER` → `LXFLOW <port>` on 7391, only answered on the
+  bound adapter's subnet). Targeting mirrors `notifyTargetsMe` (text required, `all`/
+  `everyone`, contains-match on position; lead 0 = GO only). GO fires only when the
+  caller's cue id changes, never on caller pick/reconnect or row inserts.
+- `server.js`: `/cuelight` upgrade goes to its own `WebSocketServer` (not in `broadcast`);
+  `cueLights.refresh()` after every presence broadcast; `cuelight:ack` / `cuelight:set`;
+  `cuelights` added to `sendState`; discovery starts after listen; `ROS_CONFIG` and
+  `ROS_DISCOVERY_PORT` env overrides (tests use them so they never touch the real config).
+- `public/index.html`: Settings → Cue lights (host only), `#cueAck` screen ack button.
+- `firmware/LXFlowCueLight`: Arduino sketch (WiFiManager, WebSockets, NeoPixel, ArduinoJson),
+  esp32 core 3.3.x, partition `min_spiffs`. Builds clean; not yet run on hardware.
+- Tests: `cuelights.test.mjs`, `server-cuelights.test.mjs`, `client-cuelights.test.mjs`
+  (29/29 with the existing suite). Browser check against the bundle: settings, caller
+  pick, position assign, screen ack, GO and 3 s clear all verified with simulated lights.
+

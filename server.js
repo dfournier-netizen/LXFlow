@@ -20,6 +20,7 @@ import { getDocumentProxy } from 'unpdf';
 import { OPS } from 'unpdf/pdfjs';
 import { PNG } from 'pngjs';
 import { DOMParser } from '@xmldom/xmldom';
+import { createCueLights } from './cuelights.js';
 
 // Resolve our own directory in both ESM (dev) and CJS bundle (packaged) form.
 let APP_DIR;
@@ -55,7 +56,7 @@ const ROOM_CODE = resolveCode();
 
 // Image store (served over HTTP, NOT embedded in realtime sync) + small config file.
 const IMG_DIR = process.env.ROS_IMAGES || path.join(BASE_DIR, 'runofshow-images');
-const CONFIG_PATH = path.join(BASE_DIR, 'runofshow-config.json');
+const CONFIG_PATH = process.env.ROS_CONFIG || path.join(BASE_DIR, 'runofshow-config.json');
 function loadConfig() { try { return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) || {}; } catch { return {}; } }
 function saveConfig(c) { try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(c)); } catch (e) { console.error('  ! config save failed:', e.message); } }
 let CONFIG = loadConfig();
@@ -195,6 +196,7 @@ function sendState(ws) {
   ws.send(JSON.stringify(stateMessage()));
   ws.send(JSON.stringify({ t: 'presence', users: presenceList() }));
   ws.send(JSON.stringify({ t: 'locks', locks: lockList() }));
+  ws.send(JSON.stringify({ t: 'cuelights', host: !!ws._local, ...cueLights.publicState() }));
 }
 
 /* ---- image store -------------------------------------------------------- */
@@ -617,11 +619,35 @@ const server = http.createServer(httpHandler);
 
 /* ---- WebSocket server --------------------------------------------------- */
 const wss = new WebSocketServer({ noServer: true });
+const lightWss = new WebSocketServer({ noServer: true });   // ESP32 cue lights, kept out of broadcast()
 function attachUpgrade(srv) {
   srv.on('upgrade', (req, socket, head) => {
+    if (req.url.split('?')[0] === '/cuelight') return lightWss.handleUpgrade(req, socket, head, (ws) => cueLights.attach(ws, req));
     wss.handleUpgrade(req, socket, head, (ws) => { ws._local = isLoopbackAddr(req.socket.remoteAddress); wss.emit('connection', ws, req); });
   });
 }
+
+/* ---- cue lights --------------------------------------------------------- */
+// The host picks a caller; that user's pointer drives every light. Settings
+// (caller, standby style, light names/positions) persist in runofshow-config.json.
+const cueLights = createCueLights({
+  loadState: () => CONFIG.cueLights || {},
+  saveState: (s) => { CONFIG.cueLights = s; saveConfig(CONFIG); },
+  getView: (callerId) => {
+    const c = [...clients.values()].find(x => x.id === callerId && x.pointer);
+    const p = c && c.pointer;
+    const show = p && DATA.events.find(x => x.ev.id === p.eventId)?.ev.days.find(d => d.id === p.dayId)?.shows.find(s => s.id === p.showId);
+    return show ? { cues: show.cues, idx: Number.isInteger(p.cueIdx) ? p.cueIdx : -1 } : null;
+  },
+  roomCode: () => ROOM_CODE,
+  port: () => PORT,
+  bindHost: () => BIND_HOST || '',
+  discoveryPort: parseInt(process.env.ROS_DISCOVERY_PORT, 10) || undefined,
+  onChange: (s) => {
+    for (const ws of wss.clients) if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'cuelights', host: !!ws._local, ...s }));
+  },
+  log: (msg) => console.log('  ' + msg),
+});
 attachUpgrade(server);
 
 wss.on('connection', (ws) => {
@@ -633,6 +659,7 @@ wss.on('connection', (ws) => {
     for (const [k, l] of locks) if (l.ws === ws) { locks.delete(k); changed = true; }
     broadcast({ t: 'presence', users: presenceList() });
     if (changed) broadcast({ t: 'locks', locks: lockList() });
+    cueLights.refresh();
   });
   if (!ROOM_CODE) sendState(ws);
 });
@@ -658,6 +685,7 @@ function reconcilePresence() {
   }
   broadcast({t: 'presence', users: presenceList()});
   broadcast({t: 'locks', locks: lockList()});
+  cueLights.refresh();
 }
 const mutationLabels = {'event:update':'Edit event', 'event:create':'Create event', 'event:delete':'Delete event', 'data:wipe':'Wipe show data', 'note:add':'Add note', 'note:delete':'Delete note', merge:'Import cues'};
 function handle(ws, m) {
@@ -699,12 +727,14 @@ function handleMessage(ws, m) {
       ws.send(JSON.stringify({ t: 'joined', you: clients.get(ws) }));
       if (ROOM_CODE) sendState(ws);
       broadcast({ t: 'presence', users: presenceList() });
+      cueLights.refresh();
       break;
     }
     case 'pointer': {
       const c = clients.get(ws); if (!c) break;
       c.pointer = normalizePointer(m.pointer);
       broadcast({ t: 'presence', users: presenceList() });
+      cueLights.refresh();
       break;
     }
     case 'follow': {
@@ -764,6 +794,20 @@ function handleMessage(ws, m) {
       CONFIG.bindHost = m.address || '';     // '' => all interfaces
       saveConfig(CONFIG);
       ws.send(JSON.stringify({ t: 'net:set', ok: true, current: CONFIG.bindHost, adapters: adapterList(), boundNow: BIND_HOST || '' }));
+      break;
+    }
+    case 'cuelight:ack': {          // operator screen ack: stops their own position's light flashing
+      const c = clients.get(ws);
+      if (c) cueLights.ackPosition(c.position);
+      break;
+    }
+    case 'cuelight:set': {          // host only
+      if (!ws._local) { ws.send(JSON.stringify({ t: 'error', message: 'Cue lights can only be set up on the host computer.' })); break; }
+      if (m.op === 'caller') cueLights.setCaller(m.userId);
+      else if (m.op === 'style') cueLights.setStyle(m.style);
+      else if (m.op === 'light') cueLights.configureLight(String(m.id || ''), { name: m.name, position: m.position });
+      else if (m.op === 'identify') cueLights.identify(String(m.id || ''));
+      else if (m.op === 'forget') cueLights.forget(String(m.id || ''));
       break;
     }
     case 'merge': {
@@ -851,6 +895,7 @@ server.listen(PORT, BIND_HOST || undefined, () => {
   console.log(`  Data: ${DATA_PATH}`);
   console.log(`  Keep this window open while the show runs. Close it to stop.\n`);
   if (AUTO_OPEN) openBrowser(OPEN_URL);
+  cueLights.startDiscovery();
 });
 
 // When bound to a single adapter, keep a loopback listener so the host can

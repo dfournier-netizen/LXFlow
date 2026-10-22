@@ -169,3 +169,22 @@ PDF filenames are preserved; positional image matches still require review.
 
 For completed work and remaining limits, see [the import review](IMPORT_REVIEW.md). Run
 `node scripts/audit-imports.mjs` to reproduce the documented parser edge cases.
+
+## Cue lights (ESP32)
+
+Optional external cue lights: one ESP32 + 12-LED ring + button per position, about $21 each.
+Parts, wiring, flashing and setup are in [firmware/README.md](firmware/README.md).
+
+- Lights join the same Wi-Fi as the host and find LXFlow automatically (UDP 7391), or take
+  the host IP in their setup page. They use the room code if one is set.
+- **Settings → Cue lights** (host computer only): pick the **caller** whose live cue drives
+  the lights, the **standby style** (flash → ack → steady, or steady), and give each light
+  a name and position (`all` = every notification). **Identify** spins a light white.
+- Lights follow each cue's 🔔 notification exactly like the pop-ups: **Send to** picks the
+  position, **Standby lead** sets how many cues ahead standby starts (0 = GO only).
+  Red = standby, green = GO (off after 3 s), blue breathing = lost link (cue cleared).
+- Ack (flash style): the light's button, or the flashing **STANDBY — ACK** button on the
+  operator's screen for their own position, stops that light flashing. Nothing goes back
+  to the caller.
+- Settings persist in `runofshow-config.json` (`ROS_CONFIG` overrides the path).
+
