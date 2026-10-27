@@ -891,7 +891,7 @@ function openSettings(){
 
   /* Cue lights — host only (server rejects cuelight:set from other machines) */
   const clWrap=el('div',{});
-  const CL_STATE={off:'Idle',idle:'Idle','standby-flash':'Standby (waiting for ack)',standby:'Standby (acked)',go:'GO',offline:'Offline',stop:'STOP',countdown:'Countdown',call:'Call',hold:'Hold',missed:'Missed ack',warning:'Warning',places:'Places',nocaller:'No caller'};
+  const CL_STATE={off:'Idle',idle:'Idle','standby-flash':'Standby (waiting for ack)',standby:'Standby (acked)',go:'GO',offline:'Offline',stop:'STOP',countdown:'Countdown',call:'Call',hold:'Hold',missed:'Missed ack',warning:'Warning',places:'Places'};
   let lookPos='';           // '' = defaults for every position
   function renderLooks(){
     const head=el('div',{class:'maprow',style:'margin-top:14px'}, el('span',{class:'src',style:'font-weight:600;color:var(--text)'},'Looks'));
@@ -1279,8 +1279,8 @@ function applyShowMode(){
 function applyMobile(){ document.body.classList.toggle('mobile', mobile); const t=$('#tglMobile'); if(t) t.checked=mobile; }
 
 /* ====================== cue light controls + banners ====================== */
-const CL_CONDS=['stop','go','countdown','standby','call','hold','standbyAcked','missed','warning','places','nocaller','idle'];
-const CL_LABEL={stop:'STOP',go:'GO',countdown:'Countdown',standby:'Standby (waiting for ack)',call:'Call',hold:'Hold',standbyAcked:'Standby (acked)',missed:'Missed ack',warning:'Warning',places:'Places',nocaller:'No caller',idle:'Idle',lost:'Lost LXFlow (on the light)',nowifi:'No Wi-Fi (on the light)'};
+const CL_CONDS=['stop','go','countdown','standby','call','hold','standbyAcked','missed','warning','places','idle'];
+const CL_LABEL={stop:'STOP',go:'GO',countdown:'Countdown',standby:'Standby (waiting for ack)',call:'Call',hold:'Hold',standbyAcked:'Standby (acked)',missed:'Missed ack',warning:'Warning',places:'Places',idle:'Idle',lost:'Lost LXFlow (on the light)',nowifi:'No Wi-Fi (on the light)'};
 const CL_PATTERNS=['solid','flash','pulse','dblink','spin','strobe','countdown','dot','off'];
 const CL_LOCAL_PATTERNS=['solid','flash','pulse','dblink','off'];
 const CL_PAT_LABEL={solid:'Solid',flash:'Flash',pulse:'Pulse',dblink:'Double blink',spin:'Spin',strobe:'Strobe',countdown:'Countdown',dot:'One LED',off:'Off'};

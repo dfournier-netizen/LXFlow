@@ -430,7 +430,7 @@ use the same explicit cell-level backgrounds. The active-cue outline remains on 
   saved in Preferences. The button always sends `ack`; the server decides what it answers.
   1.0.x lights still get the old `state` messages (standby, GO, off).
 - `cuelights.js` conditions, highest first: stop, go, countdown, standby, call, hold,
-  standbyAcked, missed, warning, places, nocaller, idle. Looks = DEFAULT_LOOKS < `looks`
+  standbyAcked, missed, warning, places, idle (no separate no-caller look; removed 2026-10-27). Looks = DEFAULT_LOOKS < `looks`
   < `overrides[position]`; stealth caps the level. `all` lights take global and cue
   conditions but not position Hold/Call/hand countdowns. A light's ack answers its standby
   first, then a Call to its position.

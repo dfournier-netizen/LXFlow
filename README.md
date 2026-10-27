@@ -205,7 +205,6 @@ Parts, wiring, flashing and setup are in [firmware/README.md](firmware/README.md
 | Missed ack | Dim red double blink | GO came before the ack; 10 s |
 | Warning | Amber pulse | N cues before the standby (set per cue) |
 | Places | Blue pulse | Caller or host presses **Places**; every light; until released |
-| No caller | One dim amber LED | No caller picked, or the caller's screen is offline |
 | Idle | One dim white LED | Connected, nothing pending |
 - Ack: the light's button, or the flashing **STANDBY — ACK** button on the screen of any
   operator a standby is sent to. It stops the light at their position flashing.

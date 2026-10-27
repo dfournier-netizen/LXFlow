@@ -48,7 +48,7 @@ test('parseClock reads show-sheet times', () => {
   assert.ok(parseClock('1:00 AM', new Date(2026, 9, 27, 22, 0).getTime()) > new Date(2026, 9, 27, 22, 0).getTime(), 'overnight rolls to tomorrow');
 });
 
-test('cue-driven looks: idle, standby, ack, GO, missed, warning, no caller; legacy firmware', async () => {
+test('cue-driven looks: idle, standby, ack, GO, missed, warning; legacy firmware', async () => {
   const cues = [
     { id: 'a' }, { id: 'b' },
     { id: 'c', _notify: N('LX 1', 'LX', 1, { warn: 1 }) },
@@ -89,7 +89,7 @@ test('cue-driven looks: idle, standby, ack, GO, missed, warning, no caller; lega
     assert.ok(is(lx.last, 'dot'), 'missed clears');
 
     await r.move(null);
-    assert.ok(is(lx.last, 'dot', AMBER), 'no caller: amber dot');
+    assert.ok(is(lx.last, 'dot', WHITE), 'no caller: plain idle');
   } finally { r.done(); }
 });
 

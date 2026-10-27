@@ -18,7 +18,7 @@ const STYLES = ['flash', 'steady'];
 const PATTERNS = ['solid', 'flash', 'pulse', 'dblink', 'spin', 'strobe', 'countdown', 'dot', 'off'];
 const LOCAL_PATTERNS = ['solid', 'flash', 'pulse', 'dblink', 'off'];
 // What a light shows, highest priority first.
-const CONDITIONS = ['stop', 'go', 'countdown', 'standby', 'call', 'hold', 'standbyAcked', 'missed', 'warning', 'places', 'nocaller', 'idle'];
+const CONDITIONS = ['stop', 'go', 'countdown', 'standby', 'call', 'hold', 'standbyAcked', 'missed', 'warning', 'places', 'idle'];
 const LOCAL = ['lost', 'nowifi'];             // shown by the light itself, with no LXFlow link
 const DEFAULT_LOOKS = {
   stop:         { color: '#ff0000', pattern: 'strobe',    rate: 250,  level: 100 },
@@ -31,7 +31,6 @@ const DEFAULT_LOOKS = {
   missed:       { color: '#ff0000', pattern: 'dblink',    rate: 1000, level: 30 },
   warning:      { color: '#ffa000', pattern: 'pulse',     rate: 2000, level: 100 },
   places:       { color: '#3060ff', pattern: 'pulse',     rate: 3000, level: 100 },
-  nocaller:     { color: '#ffa000', pattern: 'dot',       rate: 1000, level: 20 },
   idle:         { color: '#ffffff', pattern: 'dot',       rate: 1000, level: 10 },
   lost:         { color: '#0000ff', pattern: 'pulse',     rate: 2400, level: 35 },
   nowifi:       { color: '#ff00ff', pattern: 'pulse',     rate: 2400, level: 35 },
@@ -256,7 +255,6 @@ function createCueLights(opts) {
     if (l && l.missedUntil > t) return { cond: 'missed', key };
     if (warningFor(light, false, v)) return { cond: 'warning', key };
     if (st.places) return { cond: 'places', key };
-    if (v.idx == null) return { cond: 'nocaller', key };
     return { cond: 'idle', key };
   }
   // Firmware 1.0.x only knows standby (flash/steady), GO and off.

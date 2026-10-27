@@ -71,7 +71,6 @@ them in LXFlow Settings → Cue lights → Looks, globally or for one position.
 | Missed ack | Dim red double blink | GO came before the ack; 10 s |
 | Warning | Amber pulse | N cues before the standby (set per cue) |
 | Places | Blue pulse | Caller or host presses **Places**; every light; until released |
-| No caller | One dim amber LED | No caller picked, or the caller's screen is offline |
 | Idle | One dim white LED | Connected, nothing pending |
 
 Shown by the light itself, even with LXFlow down:
