@@ -100,9 +100,13 @@ test('standby, ack (button and screen), GO, styles, targeting, identify, forget,
     await move(0);
     cl.setStyle('steady'); await wait(20);
     assert.deepEqual([lx.last.s, lx.last.flash], ['standby', false], 'steady style');
-    assert.equal(cl.ackLight('111111111111'), false, 'nothing to ack when steady');
+    assert.equal(cl.ackLight('111111111111'), true, 'steady: the ack is recorded (for missed acks)');
+    await wait(20);
+    assert.deepEqual([lx.last.s, lx.last.flash], ['standby', false], 'steady light unchanged by ack');
     cl.setStyle('flash'); await wait(20);
-    assert.equal(lx.last.flash, true);
+    assert.equal(lx.last.flash, false, 'already acked, so no flash after switching back');
+    await move(5); await move(0);
+    assert.equal(lx.last.flash, true, 'new standby flashes');
 
     lx.ws.send(JSON.stringify({ t: 'ack' })); await wait(20);
     await move(5); await move(0);

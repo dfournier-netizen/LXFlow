@@ -637,8 +637,9 @@ const cueLights = createCueLights({
   getView: (callerId) => {
     const c = [...clients.values()].find(x => x.id === callerId && x.pointer);
     const p = c && c.pointer;
-    const show = p && DATA.events.find(x => x.ev.id === p.eventId)?.ev.days.find(d => d.id === p.dayId)?.shows.find(s => s.id === p.showId);
-    return show ? { cues: show.cues, idx: Number.isInteger(p.cueIdx) ? p.cueIdx : -1 } : null;
+    const ev = p && DATA.events.find(x => x.ev.id === p.eventId)?.ev;
+    const show = ev?.days.find(d => d.id === p.dayId)?.shows.find(s => s.id === p.showId);
+    return show ? { cues: show.cues, idx: Number.isInteger(p.cueIdx) ? p.cueIdx : -1, columns: ev.columns } : null;
   },
   getUsers: () => [...clients.values()].map(c => ({ id: c.id, name: c.name, position: c.position })),
   roomCode: () => ROOM_CODE,
@@ -647,6 +648,10 @@ const cueLights = createCueLights({
   discoveryPort: parseInt(process.env.ROS_DISCOVERY_PORT, 10) || undefined,
   onChange: (s) => {
     for (const ws of wss.clients) if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'cuelights', host: !!ws._local, ...s }));
+  },
+  onEvent: (e) => {                 // a CALL was acknowledged: tell whoever made it
+    if (e.type !== 'callAcked' || !e.to) return;
+    for (const [ws, c] of clients) if (c.id === e.to && ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'cuelight:callAcked', position: e.position, by: e.by }));
   },
   log: (msg) => console.log('  ' + msg),
 });
@@ -803,6 +808,32 @@ function handleMessage(ws, m) {
       if (c) cueLights.ackUser(c.id);
       break;
     }
+    case 'cuelight:call': {         // anyone can CALL a position
+      const c = clients.get(ws);
+      if (c) cueLights.call(String(m.position || ''), { id: c.id, name: c.name });
+      break;
+    }
+    case 'cuelight:ackCall': {      // the called position answers from their screen
+      const c = clients.get(ws);
+      if (c) cueLights.ackCall(c.position, c.name);
+      break;
+    }
+    case 'cuelight:callCancel': {   // whoever called, or the caller/host
+      const c = clients.get(ws);
+      if (c && (ws._local || c.id === cueLights.getCaller() || c.id === cueLights.callFrom(m.position))) cueLights.cancelCall(String(m.position || ''));
+      break;
+    }
+    case 'cuelight:cmd': {          // caller or host: HOLD, PLACES, STOP, countdown, stealth
+      const c = clients.get(ws);
+      if (!c || !(ws._local || c.id === cueLights.getCaller())) { ws.send(JSON.stringify({ t: 'error', message: 'Only the caller or the host computer can do that.' })); break; }
+      if (m.op === 'hold') cueLights.setHold(String(m.position || ''), !!m.on);
+      else if (m.op === 'places') cueLights.setPlaces(!!m.on);
+      else if (m.op === 'stop') cueLights.setStop(!!m.on);
+      else if (m.op === 'countdown') cueLights.startCountdown(String(m.position || ''), m.seconds);
+      else if (m.op === 'countdownCancel') cueLights.cancelCountdown(String(m.position || ''));
+      else if (m.op === 'stealth') cueLights.setStealth(!!m.on);
+      break;
+    }
     case 'cuelight:set': {          // host only
       if (!ws._local) { ws.send(JSON.stringify({ t: 'error', message: 'Cue lights can only be set up on the host computer.' })); break; }
       if (m.op === 'caller') cueLights.setCaller(m.userId);
@@ -811,6 +842,10 @@ function handleMessage(ws, m) {
       else if (m.op === 'light') cueLights.configureLight(String(m.id || ''), { name: m.name, position: m.position });
       else if (m.op === 'identify') cueLights.identify(String(m.id || ''));
       else if (m.op === 'forget') cueLights.forget(String(m.id || ''));
+      else if (m.op === 'look') cueLights.setLook(String(m.cond || ''), m.look || null);
+      else if (m.op === 'override') cueLights.setOverride(String(m.position || ''), String(m.cond || ''), m.look || null);
+      else if (m.op === 'stealthLevel') cueLights.setStealth(null, m.level);
+      else if (m.op === 'preview') cueLights.preview(String(m.cond || ''), String(m.position || ''), m.look || null);
       break;
     }
     case 'merge': {

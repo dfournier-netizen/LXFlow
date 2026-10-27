@@ -177,6 +177,27 @@ button.mini.on{background:var(--warn);border-color:var(--warn);color:#000}
 body.noside aside{display:none}
 body.noside #app{grid-template-columns:minmax(0,1fr)}
 body.noside .gobtn{right:24px}
+.clctl{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+.clctl select,.clctl input{flex:1 1 120px;min-width:0}
+.clnote{display:flex;gap:6px;align-items:center;justify-content:space-between;font-size:12px;padding:4px 8px;margin-bottom:4px;border-radius:8px;background:var(--panel2)}
+button.clstop{flex:1;background:#c62828;border-color:#c62828;color:#fff;font-weight:800;letter-spacing:1px}
+button.clstop.on{animation:cueblink .5s steps(1) infinite}
+#clBanners{position:fixed;left:24px;bottom:calc(max(24px,env(safe-area-inset-bottom)) + 76px);z-index:31;display:flex;flex-direction:column-reverse;gap:8px;max-width:min(420px,calc(100vw - 48px))}
+.clban{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 16px;border-radius:14px;font-weight:800;font-size:16px;letter-spacing:.5px;box-shadow:0 8px 28px #0006;border:2px solid #0003}
+.clban button{font-weight:800}
+.clban.stop{background:#c62828;color:#fff;animation:cueblink .5s steps(1) infinite}
+.clban.call{background:#f4f4f4;color:#111}
+.clban.hold{background:#ffa000;color:#1a1000}
+.clban.cd{background:#ff5000;color:#fff}
+.clban.warn{background:var(--panel2);color:var(--warn);border-color:var(--warn)}
+.clban.places{background:#3060ff;color:#fff}
+.cdleft{font-variant-numeric:tabular-nums}
+.lookrow{display:grid;grid-template-columns:minmax(0,1.4fr) 44px minmax(0,1fr) minmax(0,1fr) minmax(0,.9fr) auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)}
+.lookrow .lbl{font-size:13px}
+.lookrow input[type=color]{width:40px;height:30px;padding:0;border:1px solid var(--line);border-radius:6px;background:none}
+.lookrow input[type=range]{width:100%}
+.lookrow.inherit select,.lookrow.inherit input:not([type=checkbox]){opacity:.45}
+@media (max-width:600px){.lookrow{grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr)}#clBanners{left:16px;right:16px;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 156px)}}
 .clrow{display:grid;grid-template-columns:auto 1fr 1fr auto auto;gap:6px 8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
 .clrow input{min-width:0}
 .clrow .pos{grid-column:2/-1;font-size:12px}
@@ -352,6 +373,8 @@ body.mobile #app.showmode #grid td[data-key]:empty{display:none}
   <aside>
     <h3>On This Page</h3>
     <div id="presence"></div>
+    <h3>Cue lights</h3>
+    <div id="clPanel"></div>
     <h3>Auto-Track</h3>
     <select id="followSel"><option value="">— follow no one —</option></select>
     <small class="hint">Pins your view to the selected operator's cue.</small>
@@ -364,6 +387,7 @@ body.mobile #app.showmode #grid td[data-key]:empty{display:none}
 
 <button id="goBtn" class="gobtn hidden">GO ▸</button>
 <button id="cueAck" class="cueack hidden" title="Acknowledge your standby">⏱ STANDBY — ACK</button>
+<div id="clBanners" aria-live="assertive"></div>
 
 <!-- sign-in -->
 <div id="signin" class="scrim">
@@ -447,6 +471,8 @@ let clip = [];              // copied cue rows (clones, ids stripped)
 let firedNotes = new Set(); // notification keys already shown
 let cueLights = { host:false, style:'flash', caller:'', lights:[] };   // from server 'cuelights'
 let cueLightsRender = null; // callback to refresh the open Settings → Cue lights section
+let clSkew = 0;             // server clock minus this device's clock, for countdowns
+let clCdSecs = 30;          // last countdown length typed in the sidebar
 let ws;
 
 applyTheme();
@@ -464,7 +490,8 @@ function connect(){
     else if(m.t==='error'){ toast(m.message||'The operation could not be completed'); }
     else if(m.t==='lockDenied'){ onLockDenied(m.cueId, m.colKey, m.by); }
     else if(m.t==='net:set'){ toast(m.ok ? 'Network adapter saved \u2014 applies next time you start the app' : (m.error||'Not allowed')); }
-    else if(m.t==='cuelights'){ cueLights=m; renderCueAck(); renderPresence(); if(cueLightsRender) cueLightsRender(); }
+    else if(m.t==='cuelights'){ cueLights=m; if(m.now) clSkew=m.now-Date.now(); renderCueAck(); renderPresence(); renderClPanel(); renderBanners(); if(cueLightsRender) cueLightsRender(); }
+    else if(m.t==='cuelight:callAcked'){ toast(`${m.by} answered your call`); }
     else if(m.t==='joined'){ /* ack */ }
   };
   ws.onclose = ()=>{ if(!$('#app').classList.contains('hidden')) setTimeout(connect, 1000); };
@@ -864,10 +891,51 @@ function openSettings(){
 
   /* Cue lights — host only (server rejects cuelight:set from other machines) */
   const clWrap=el('div',{});
-  const CL_STATE={off:'Idle','standby-flash':'Standby (flashing)',standby:'Standby',go:'GO',offline:'Offline'};
+  const CL_STATE={off:'Idle',idle:'Idle','standby-flash':'Standby (waiting for ack)',standby:'Standby (acked)',go:'GO',offline:'Offline',stop:'STOP',countdown:'Countdown',call:'Call',hold:'Hold',missed:'Missed ack',warning:'Warning',places:'Places',nocaller:'No caller'};
+  let lookPos='';           // '' = defaults for every position
+  function renderLooks(){
+    const head=el('div',{class:'maprow',style:'margin-top:14px'}, el('span',{class:'src',style:'font-weight:600;color:var(--text)'},'Looks'));
+    const posSel=el('select',{onchange:()=>{ lookPos=posSel.value; posSel.blur(); cueLightsRender(); }}, el('option',{value:''},'Defaults (every position)'));
+    (cueLights.positions||[]).forEach(p=>posSel.append(el('option',{value:p},'Override for '+p)));
+    posSel.value=lookPos; head.append(posSel);
+    clWrap.append(head);
+    const ov=lookPos ? ((cueLights.overrides||{})[lookPos.trim().toLowerCase()]||{}) : null;
+    const conds=lookPos ? CL_CONDS : [...CL_CONDS,'lost','nowifi'];
+    conds.forEach(k=>{
+      const local=k==='lost'||k==='nowifi';
+      const base=(cueLights.looks||{})[k]||{color:'#ffffff',pattern:'solid',rate:1000,level:100};
+      const custom=!!(ov && ov[k]);
+      const cur=custom?ov[k]:base;
+      const color=el('input',{type:'color',value:cur.color,title:'Colour'});
+      const pat=el('select',{title:'Pattern'});
+      (local?CL_LOCAL_PATTERNS:CL_PATTERNS).forEach(p=>pat.append(el('option',{value:p},CL_PAT_LABEL[p])));
+      pat.value=cur.pattern;
+      const speed=el('select',{title:'Speed'});
+      CL_SPEEDS.forEach(([ms,lab])=>speed.append(el('option',{value:String(ms)},lab)));
+      if(!CL_SPEEDS.some(([ms])=>ms===cur.rate)) speed.append(el('option',{value:String(cur.rate)},cur.rate+' ms'));
+      speed.value=String(cur.rate);
+      const level=el('input',{type:'range',min:'1',max:'100',value:String(cur.level),title:'Level %'});
+      const val=()=>({color:color.value,pattern:pat.value,rate:+speed.value,level:+level.value});
+      const commit=()=>{ if(lookPos){ if(chk.checked) send({t:'cuelight:set',op:'override',position:lookPos,cond:k,look:val()}); }
+                         else send({t:'cuelight:set',op:'look',cond:k,look:val()}); };
+      const chk=el('input',{type:'checkbox',title:'Use a custom look for this position'});
+      chk.checked=custom;
+      chk.addEventListener('change',()=>{ if(chk.checked) send({t:'cuelight:set',op:'override',position:lookPos,cond:k,look:val()}); else send({t:'cuelight:set',op:'override',position:lookPos,cond:k,look:null}); });
+      [color,pat,speed,level].forEach(i=>i.addEventListener('change',commit));
+      const test=local
+        ? el('button',{class:'mini',title:'Reset to the built-in look',onclick:()=>send({t:'cuelight:set',op:'look',cond:k,look:null})},'Reset')
+        : el('button',{class:'mini',title:'Show this look on the lights for 3 s',onclick:()=>send({t:'cuelight:set',op:'preview',cond:k,position:lookPos,look:val()})},'Test');
+      const label=el('span',{class:'lbl'}, lookPos? el('label',{style:'display:flex;gap:6px;align-items:center'}, chk, CL_LABEL[k]) : CL_LABEL[k]);
+      clWrap.append(el('div',{class:'lookrow'+(lookPos&&!custom?' inherit':'')}, label, color, pat, speed, level, test));
+    });
+    const lvl=el('input',{type:'range',min:'1',max:'100',value:String(cueLights.stealthLevel||15),onchange:()=>send({t:'cuelight:set',op:'stealthLevel',level:+lvl.value})});
+    clWrap.append(el('div',{class:'maprow',style:'margin-top:8px'}, el('span',{class:'src'},'Stealth caps every look at this level (%)'), lvl));
+    if(!lookPos) clWrap.append(el('div',{class:'pos',style:'color:var(--dim);margin-top:4px'},'Changing a default changes it for every position without its own override. Lost and No Wi-Fi are shown by the light itself and saved on it.'));
+  }
   cueLightsRender=()=>{
     if(!document.body.contains(clWrap)){ cueLightsRender=null; return; }
-    if(clWrap.contains(document.activeElement)) return;   // don't clobber a field being edited
+    const fa=document.activeElement;
+    if(clWrap.contains(fa) && /^(SELECT|INPUT)$/.test(fa.tagName)) return;   // don't clobber a field being edited
     clWrap.innerHTML='';
     if(!cueLights.host){ clWrap.append(el('div',{class:'pos'},`\ud83d\udd12 Cue lights are set up on the host computer (http://localhost:${location.port||'7390'}). ${cueLights.lights.filter(l=>l.online).length} light(s) online.`)); return; }
     const callerSel=el('select',{onchange:()=>send({t:'cuelight:set',op:'caller',userId:callerSel.value})});
@@ -897,8 +965,9 @@ function openSettings(){
         : el('button',{class:'mini',title:'Remove this offline light',onclick:()=>send({t:'cuelight:set',op:'forget',id:l.id})},'Forget');
       clWrap.append(el('div',{class:'clrow'},
         el('span',{class:'dot',style:`background:${l.online?'var(--ok)':'var(--dim)'}`}), name, pos, act, el('span',{}),
-        el('div',{class:'pos'}, `${CL_STATE[l.state]||l.state}${l.position?'':' \u2014 assign a position to use it'}${l.ip?' \u00b7 '+l.ip:''}${l.fw?' \u00b7 fw '+l.fw:''}`)));
+        el('div',{class:'pos'}, `${CL_STATE[l.state]||l.state}${l.position?'':' \u2014 assign a position to use it'}${l.ip?' \u00b7 '+l.ip:''}${l.fw?' \u00b7 fw '+l.fw:''}${l.needsFlash?' \u00b7 flash firmware 1.1 for custom looks':''}`)));
     });
+    renderLooks();
     clWrap.append(el('div',{class:'pos',style:'color:var(--dim);margin-top:6px'},'Lights and operators follow the caller\u2019s live cue and each cue\u2019s \ud83d\udd14 notification (Send to + Standby lead). A light set to "all" lights for every notification. The dot beside each person in the sidebar is red until they ack their standby.'));
   };
   clWrap.addEventListener('focusout',()=>setTimeout(()=>{ if(cueLightsRender && !clWrap.contains(document.activeElement)) cueLightsRender(); },0));
@@ -1209,6 +1278,71 @@ function applyShowMode(){
 /* ====================== mobile ====================== */
 function applyMobile(){ document.body.classList.toggle('mobile', mobile); const t=$('#tglMobile'); if(t) t.checked=mobile; }
 
+/* ====================== cue light controls + banners ====================== */
+const CL_CONDS=['stop','go','countdown','standby','call','hold','standbyAcked','missed','warning','places','nocaller','idle'];
+const CL_LABEL={stop:'STOP',go:'GO',countdown:'Countdown',standby:'Standby (waiting for ack)',call:'Call',hold:'Hold',standbyAcked:'Standby (acked)',missed:'Missed ack',warning:'Warning',places:'Places',nocaller:'No caller',idle:'Idle',lost:'Lost LXFlow (on the light)',nowifi:'No Wi-Fi (on the light)'};
+const CL_PATTERNS=['solid','flash','pulse','dblink','spin','strobe','countdown','dot','off'];
+const CL_LOCAL_PATTERNS=['solid','flash','pulse','dblink','off'];
+const CL_PAT_LABEL={solid:'Solid',flash:'Flash',pulse:'Pulse',dblink:'Double blink',spin:'Spin',strobe:'Strobe',countdown:'Countdown',dot:'One LED',off:'Off'};
+const CL_SPEEDS=[[3000,'Very slow'],[2000,'Slow'],[1000,'Medium'],[500,'Fast'],[250,'Very fast']];
+const clNorm=s=>String(s||'').trim().toLowerCase();
+function clCanControl(){ return !!(cueLights.host || (cueLights.caller && cueLights.caller===me.id)); }
+function renderClPanel(){
+  const box=$('#clPanel'); if(!box) return;
+  const fa=document.activeElement;
+  if(box.contains(fa) && /^(SELECT|INPUT)$/.test(fa.tagName)) return;     // don't reset a picker in use
+  box.innerHTML='';
+  const c=cueLights.cond||{}, pos=cueLights.positions||[];
+  const pick=(placeholder,list)=>{ const s=el('select',{}); s.append(el('option',{value:''},placeholder)); list.forEach(p=>s.append(el('option',{value:p},p))); return s; };
+  const callSel=pick('Call a position\u2026', pos.filter(p=>clNorm(p)!==clNorm(me.position)));
+  box.append(el('div',{class:'clctl'}, callSel, el('button',{class:'mini',onclick:()=>{ if(callSel.value){ send({t:'cuelight:call',position:callSel.value}); toast('Calling '+callSel.value); } }},'Call')));
+  Object.values(c.calls||{}).forEach(k=>{
+    const row=el('div',{class:'clnote'}, el('span',{},`Calling ${k.position} \u00b7 from ${k.fromName}`));
+    if(k.fromId===me.id||clCanControl()) row.append(el('button',{class:'mini',onclick:()=>send({t:'cuelight:callCancel',position:k.position})},'Cancel'));
+    box.append(row);
+  });
+  if(!clCanControl()){
+    const st=[c.stop&&'STOP',c.places&&'PLACES',...(c.holds||[]).map(h=>'HOLD '+h)].filter(Boolean);
+    if(st.length) box.append(el('div',{class:'pos'}, st.join(' \u00b7 ')));
+    return;
+  }
+  box.append(el('div',{class:'clctl'}, el('button',{class:'clstop'+(c.stop?' on':''),onclick:()=>send({t:'cuelight:cmd',op:'stop',on:!c.stop})}, c.stop?'Release STOP':'STOP')));
+  box.append(el('div',{class:'clctl'},
+    el('button',{class:c.places?'primary':'',onclick:()=>send({t:'cuelight:cmd',op:'places',on:!c.places})}, c.places?'Release Places':'Places'),
+    el('button',{class:cueLights.stealth?'primary':'',title:'Cap every light at the stealth level',onclick:()=>send({t:'cuelight:cmd',op:'stealth',on:!cueLights.stealth})}, cueLights.stealth?'Stealth on':'Stealth')));
+  const holdSel=pick('Hold a position\u2026', pos);
+  box.append(el('div',{class:'clctl'}, holdSel, el('button',{class:'mini',onclick:()=>{ if(holdSel.value) send({t:'cuelight:cmd',op:'hold',position:holdSel.value,on:true}); }},'Hold')));
+  (c.holds||[]).forEach(h=>box.append(el('div',{class:'clnote'}, el('span',{},'HOLD '+h), el('button',{class:'mini',onclick:()=>send({t:'cuelight:cmd',op:'hold',position:h,on:false})},'Release'))));
+  const cdSel=pick('Countdown for\u2026', pos);
+  const secs=el('input',{type:'number',min:'1',max:'3600',value:String(clCdSecs),style:'flex:0 0 70px',title:'Seconds',onchange:()=>{ clCdSecs=+secs.value||30; }});
+  box.append(el('div',{class:'clctl'}, cdSel, secs, el('button',{class:'mini',onclick:()=>{ clCdSecs=+secs.value||30; if(cdSel.value) send({t:'cuelight:cmd',op:'countdown',position:cdSel.value,seconds:clCdSecs}); }},'Start')));
+  Object.values(c.countdowns||{}).forEach(k=>box.append(el('div',{class:'clnote'}, el('span',{},`Countdown ${k.position} `, el('span',{class:'cdleft','data-end':String(k.end)})), el('button',{class:'mini',onclick:()=>send({t:'cuelight:cmd',op:'countdownCancel',position:k.position})},'Cancel'))));
+  tickCountdowns();
+}
+function renderBanners(){
+  const box=$('#clBanners'); if(!box) return;
+  box.innerHTML='';
+  if($('#app').classList.contains('hidden')) return;
+  const c=cueLights.cond||{}, p=clNorm(me.position);
+  const add=(cls,...kids)=>box.append(el('div',{class:'clban '+cls,role:'status'}, ...kids));
+  if(c.stop) add('stop', el('span',{},'STOP'));
+  const call=p && (c.calls||{})[p];
+  if(call) add('call', el('span',{},`CALL from ${call.fromName}`), el('button',{onclick:()=>send({t:'cuelight:ackCall'})},'ACK'));
+  if(p && (c.holds||[]).some(h=>clNorm(h)===p)) add('hold', el('span',{},'HOLD'));
+  const cd=(cueLights.crewCd||{})[me.id];
+  if(cd) add('cd', el('span',{},'COUNTDOWN'), el('span',{class:'cdleft','data-end':String(cd.end)}));
+  if((cueLights.crewWarn||{})[me.id]) add('warn', el('span',{},'WARNING \u2014 standby coming up'));
+  if(c.places) add('places', el('span',{},'PLACES'));
+  tickCountdowns();
+}
+function tickCountdowns(){
+  document.querySelectorAll('.cdleft').forEach(s=>{
+    const left=Math.max(0, +s.dataset.end - (Date.now()+clSkew)), t=Math.ceil(left/1000);
+    s.textContent=`${Math.floor(t/60)}:${String(t%60).padStart(2,'0')}`;
+  });
+}
+setInterval(tickCountdowns, 250);
+
 /* ====================== cue light ack (operator screen) ====================== */
 function renderCueAck(){
   const pending=!!(cueLights.crew && cueLights.crew[me.id]==='pending');
@@ -1249,9 +1383,17 @@ function editNotify(idx){
   const txt=el('input',{value:n.text||'', placeholder:'e.g. Standby to mic the talent'});
   const tgt=el('input',{value:n.target||'all', placeholder:'all, or a position e.g. A2', list:'positions'});
   const lead=el('input',{type:'number', min:'0', max:'20', value:String(n.lead??1), style:'width:80px'});
+  const warn=el('input',{type:'number', min:'0', max:'20', value:String(n.warn??0), style:'width:80px'});
+  const cdMode=el('select',{}, el('option',{value:''},'None'), el('option',{value:'time'},'Count down to this cue\u2019s Time'), el('option',{value:'seconds'},'Count down from when standby starts'));
+  cdMode.value=(n.cd&&n.cd.mode)||'';
+  const cdSecs=el('input',{type:'number', min:'1', max:'3600', value:String((n.cd&&n.cd.seconds)||60), style:'width:90px'});
   const save=el('button',{class:'primary',onclick:()=>{
     const t=txt.value.trim();
-    if(!t){ delete cue._notify; } else { cue._notify={ text:t, target:(tgt.value.trim()||'all'), lead:Math.max(0,parseInt(lead.value)||0) }; }
+    if(!t){ delete cue._notify; } else {
+      cue._notify={ text:t, target:(tgt.value.trim()||'all'), lead:Math.max(0,parseInt(lead.value)||0) };
+      const w=Math.max(0,parseInt(warn.value)||0); if(w) cue._notify.warn=w;
+      if(cdMode.value) cue._notify.cd={ mode:cdMode.value, seconds:Math.min(3600,Math.max(1,parseInt(cdSecs.value)||60)) };
+    }
     firedNotes.clear(); pushEvent(); renderBody(); close();
   }}, 'Save');
   const rem=el('button',{onclick:()=>{ delete cue._notify; pushEvent(); renderBody(); close(); }}, 'Remove');
@@ -1260,6 +1402,9 @@ function editNotify(idx){
     el('div',{class:'field'}, el('label',{},'Message'), txt),
     el('div',{class:'field'}, el('label',{},'Send to (All, or match a position/name)'), tgt),
     el('div',{class:'field'}, el('label',{},'Standby lead — cues before (0 = only at GO)'), lead),
+    el('div',{class:'field'}, el('label',{},'Warning — cues before the standby (0 = none)'), warn),
+    el('div',{class:'field'}, el('label',{},'Countdown on the cue lights'), cdMode),
+    el('div',{class:'field'}, el('label',{},'Countdown length (seconds). For Time, it starts this long before the time in the Time column.'), cdSecs),
   ], [save, rem]);
 }
 

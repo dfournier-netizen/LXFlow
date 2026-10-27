@@ -181,8 +181,32 @@ Parts, wiring, flashing and setup are in [firmware/README.md](firmware/README.md
   the lights, the **standby style** (flash → ack → steady, or steady), and give each light
   a name and position (`all` = every notification). **Identify** spins a light white.
 - Lights follow each cue's 🔔 notification exactly like the pop-ups: **Send to** picks the
-  position, **Standby lead** sets how many cues ahead standby starts (0 = GO only).
-  Red = standby, green = GO (off after 3 s), blue breathing = lost link (cue cleared).
+  position, **Standby lead** sets how many cues ahead standby starts (0 = GO only),
+  **Warning** adds an earlier heads-up, and **Countdown** drains the ring to the cue's
+  Time or for a set number of seconds from the standby.
+- **Sidebar → Cue lights:** anyone can **Call** a position (the caller is told when it's
+  answered). The caller and the host also get **STOP**, **Places**, **Stealth**, **Hold**
+  a position and a hand-started **Countdown**. STOP, Places and Hold stay on until released.
+  Operators see matching banners on their screen, with **ACK** for a call.
+- **Looks:** Settings → Cue lights → *Looks* sets the colour, pattern, speed and level of
+  every condition, with optional overrides per position. **Test** shows a look on the
+  lights for 3 s. Lost-link and no-Wi-Fi looks are saved on the light itself.
+  Custom looks need firmware 1.1; 1.0.x lights still show standby and GO.
+
+| Condition | Built-in look | When |
+|---|---|---|
+| STOP | Red strobe | Caller or host presses **STOP**; every light; until released |
+| GO | Green solid | Caller's GO onto a cue sent to this position; 3 s |
+| Countdown | Orange, ring drains | To the cue's Time, N seconds from standby, or started by hand |
+| Standby | Red flash | Standby waiting for ack (flash style) |
+| Call | White spin | Anyone calls this position; until the light's button or the screen ACK answers it |
+| Hold | Amber solid | Caller or host holds this position; until released |
+| Standby (acked) | Red solid | Acked, or steady style |
+| Missed ack | Dim red double blink | GO came before the ack; 10 s |
+| Warning | Amber pulse | N cues before the standby (set per cue) |
+| Places | Blue pulse | Caller or host presses **Places**; every light; until released |
+| No caller | One dim amber LED | No caller picked, or the caller's screen is offline |
+| Idle | One dim white LED | Connected, nothing pending |
 - Ack: the light's button, or the flashing **STANDBY — ACK** button on the screen of any
   operator a standby is sent to. It stops the light at their position flashing.
 - **Ack dots:** each person in the sidebar's *On this page* list has a dot: green when

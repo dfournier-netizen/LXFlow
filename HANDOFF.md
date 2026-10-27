@@ -422,3 +422,28 @@ use the same explicit cell-level backgrounds. The active-cue outline remains on 
   ack dots follow the caller.
 - 31/31 tests; browser check of dots (pending → ack → green, missed → green after 10 s)
   and the sidebar toggle against the bundle.
+
+### Cue light looks, conditions and commands — firmware 1.1.0 — 2026-10-27
+
+- Firmware 1.1.0 is a renderer: `{t:'look', c:[r,g,b], p, r, b, cd?:{l,t}}`, patterns
+  solid/flash/pulse/dblink/spin/strobe/countdown/dot/off. `{t:'local', lost, nowifi}` is
+  saved in Preferences. The button always sends `ack`; the server decides what it answers.
+  1.0.x lights still get the old `state` messages (standby, GO, off).
+- `cuelights.js` conditions, highest first: stop, go, countdown, standby, call, hold,
+  standbyAcked, missed, warning, places, nocaller, idle. Looks = DEFAULT_LOOKS < `looks`
+  < `overrides[position]`; stealth caps the level. `all` lights take global and cue
+  conditions but not position Hold/Call/hand countdowns. A light's ack answers its standby
+  first, then a Call to its position.
+- `_notify` gains `warn` (cues before the standby window) and `cd {mode:'time'|'seconds',
+  seconds}`. Time mode reads the event's `time` column (or a column labelled Time/Start/
+  Go time) as a clock time on the host. Seconds mode starts when the standby opens.
+- Messages: `cuelight:call` (anyone), `cuelight:ackCall`, `cuelight:callCancel` (caller of
+  the CALL, the show caller, or host), `cuelight:cmd` ops hold/places/stop/countdown/
+  countdownCancel/stealth (show caller or host), `cuelight:set` ops look/override/
+  stealthLevel/preview (host). Server → the CALL's sender: `cuelight:callAcked`.
+- `cuelights` state adds `looks`, `overrides`, `stealth`, `stealthLevel`, `positions`,
+  `cond {stop, places, holds, calls, countdowns}`, `crewCd`, `crewWarn`, `now`.
+  STOP, Places and holds persist in the config; calls and countdowns don't.
+- Client: sidebar *Cue lights* panel (`renderClPanel`), banners (`#clBanners`), Settings
+  *Looks* editor with per-position overrides and Test, warning/countdown fields in the 🔔
+  editor. 37/37 tests; browser check against the bundle with a simulated 1.1 light.

@@ -2,8 +2,9 @@
   LXFlow Cue Light — ESP32 firmware
   ---------------------------------
   One cue light per ESP32. Connects to LXFlow over Wi-Fi (WebSocket, path /cuelight)
-  and shows what LXFlow tells it to show. Flash timing and the ack button are handled
-  here, so the network only carries state changes.
+  and shows the "look" LXFlow sends: a colour, a pattern, a speed and a level. Pattern
+  timing runs here, so the network only carries changes. Every look (standby, GO, hold,
+  call, countdown, places, stop...) is set in LXFlow Settings -> Cue lights.
 
   Hardware (ESP32-WROOM-32 DevKit, 38- or 30-pin):
     WS2812 ring DIN  -> GPIO 16 (through a 330 ohm resistor)
@@ -11,19 +12,17 @@
     Ack button       -> GPIO 27 to GND (internal pull-up). The on-board BOOT button also works.
 
   Button:
-    Short press  = ack during a standby (stops a flashing light; marks your
-                   position acknowledged in LXFlow in either standby style)
+    Short press  = ack: LXFlow decides what it answers (a standby first, else a CALL)
     Hold 5 s     = open the Wi-Fi setup portal (ring turns cyan)
 
-  Light patterns:
-    Red flashing      standby (flash style, not yet acked)
-    Red steady        standby (acked, or steady style)
-    Green             GO (turns off after the time LXFlow sends, default 3 s)
-    One dim white px  connected, idle
-    White spin        identify (from LXFlow Settings)
-    Blue breathing    Wi-Fi OK but no link to LXFlow   <- never shows a stale cue
-    Purple breathing  no Wi-Fi
-    Cyan steady       setup portal open: join "LXFlow-CueLight-XXXX" and browse to 192.168.4.1
+  Shown by the light itself (colours can be set from LXFlow; saved on the light):
+    Lost LXFlow  default blue breathing     <- the last cue is cleared, never stale
+    No Wi-Fi     default purple breathing
+    Setup portal cyan steady: join "LXFlow-CueLight-XXXX" and browse to 192.168.4.1
+    Identify     white spin (from LXFlow Settings)
+
+  Patterns: solid, flash, pulse, dblink (double blink), spin, strobe, countdown
+  (the ring drains to zero), dot (one LED), off. LXFlow 1.0.x-era messages are not used.
 
   Libraries (Arduino Library Manager): WiFiManager (tzapu) 2.0.17, WebSockets (Markus Sattler) 2.7.x,
   Adafruit NeoPixel 1.15.x, ArduinoJson 7.x. Board: esp32 by Espressif 3.x, "ESP32 Dev Module".
@@ -37,7 +36,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 
-#define FW_VERSION      "1.0.1"
+#define FW_VERSION      "1.1.0"
 #define LED_PIN         16
 #define BTN_PIN         27
 #define ACK_BOOT_PIN        0
@@ -46,6 +45,10 @@
 #define DEFAULT_PORT    7390
 #define HOLD_PORTAL_MS  5000
 #define REDISCOVER_MS   10000   // auto mode: if the link stays down this long, look for LXFlow again
+
+// A look from LXFlow (declared up here so Arduino's generated prototypes can see it).
+enum Pat : uint8_t { P_SOLID, P_FLASH, P_PULSE, P_DBLINK, P_SPIN, P_STROBE, P_COUNTDOWN, P_DOT, P_OFF };
+struct Look { uint8_t r, g, b; uint8_t pat; uint16_t rate; uint8_t lvl; };
 
 // ---------- config (persisted) ----------
 Preferences prefs;
@@ -92,11 +95,25 @@ WiFiManager wm;
 String deviceId;     // MAC without colons
 String apName;       // LXFlow-CueLight-XXXX
 
-// ---------- state ----------
-enum Cue  { CUE_OFF, CUE_STANDBY_FLASH, CUE_STANDBY, CUE_GO };
-Cue      cue = CUE_OFF;
-uint32_t goUntil = 0;
+// ---------- looks ----------
+const Look IDLE_LOOK = { 255, 255, 255, P_DOT, 1000, 25 };
+Look cur      = IDLE_LOOK;                          // what LXFlow last asked for
+Look lostLook = { 0, 0, 255, P_PULSE, 2400, 89 };   // no link to LXFlow
+Look wifiLook = { 255, 0, 255, P_PULSE, 2400, 89 }; // no Wi-Fi
+uint32_t cdEnd = 0, cdTotal = 0;                    // countdown pattern
 uint32_t identUntil = 0;
+
+uint8_t patFromName(const char *p) {
+  static const char *names[] = { "solid", "flash", "pulse", "dblink", "spin", "strobe", "countdown", "dot", "off" };
+  for (uint8_t i = 0; i < 9; i++) if (!strcmp(p, names[i])) return i;
+  return P_SOLID;
+}
+void loadLocalLooks() {
+  prefs.begin("cuelight", true);
+  if (prefs.getBytesLength("lost") == sizeof(Look)) prefs.getBytes("lost", &lostLook, sizeof(Look));
+  if (prefs.getBytesLength("nowifi") == sizeof(Look)) prefs.getBytes("nowifi", &wifiLook, sizeof(Look));
+  prefs.end();
+}
 
 bool     wsStarted = false;
 bool     linked = false;
@@ -118,6 +135,39 @@ uint8_t breathe(uint32_t now, uint16_t periodMs) {   // 0..255 triangle-ish brea
   return (uint8_t)((v * v) / 255);                    // ease
 }
 
+uint32_t col(const Look &L, uint16_t k) {           // k = 0..255 intensity within the look
+  uint32_t s = (uint32_t)L.lvl * k;
+  return ring.Color(L.r * s / 65025, L.g * s / 65025, L.b * s / 65025);
+}
+
+void paint(const Look &L, uint32_t now) {
+  ring.clear();
+  uint16_t rate = L.rate < 100 ? 100 : L.rate;
+  uint32_t ph = now % rate;
+  switch (L.pat) {
+    case P_SOLID:  fill(col(L, 255)); break;
+    case P_FLASH:  if (ph < rate / 2) fill(col(L, 255)); break;
+    case P_PULSE:  fill(col(L, breathe(now, rate))); break;
+    case P_DBLINK: if (ph < rate * 12 / 100 || (ph >= rate * 25 / 100 && ph < rate * 37 / 100)) fill(col(L, 255)); break;
+    case P_STROBE: if (ph < max<uint32_t>(30, rate * 15 / 100)) fill(col(L, 255)); break;
+    case P_SPIN: {
+      uint16_t head = (now / max<uint32_t>(1, rate / ledCount)) % ledCount;
+      for (uint8_t k = 0; k < 3 && k < ledCount; k++) ring.setPixelColor((head + ledCount - k) % ledCount, col(L, 255 >> k));
+      break;
+    }
+    case P_COUNTDOWN: {
+      if (!cdTotal) { fill(col(L, 255)); break; }
+      int32_t left = (int32_t)(cdEnd - now);
+      if (left <= 0) break;                                  // ran out: dark until LXFlow moves on
+      uint32_t n = ((uint32_t)left * ledCount + cdTotal - 1) / cdTotal;
+      fill(col(L, 255), n > ledCount ? ledCount : n);
+      break;
+    }
+    case P_DOT: ring.setPixelColor(0, col(L, 255)); break;
+    default: break;                                          // P_OFF
+  }
+}
+
 void render() {
   uint32_t now = millis();
   ring.setBrightness(bright);
@@ -132,21 +182,9 @@ void render() {
   }
   identUntil = 0;
 
-  if (WiFi.status() != WL_CONNECTED) {
-    uint8_t b = breathe(now, 2400) / 3;
-    fill(ring.Color(b, 0, b));
-  } else if (!linked) {
-    uint8_t b = breathe(now, 2400) / 3;
-    fill(ring.Color(0, 0, b));
-  } else {
-    if (cue == CUE_GO && (int32_t)(goUntil - now) <= 0) cue = CUE_OFF;
-    switch (cue) {
-      case CUE_GO:            fill(ring.Color(0, 255, 0)); break;
-      case CUE_STANDBY:       fill(ring.Color(255, 0, 0)); break;
-      case CUE_STANDBY_FLASH: fill(((now / 250) & 1) ? 0 : ring.Color(255, 0, 0)); break;
-      default:                fill(ring.Color(6, 6, 6), 1); break;   // alive pixel
-    }
-  }
+  if (WiFi.status() != WL_CONNECTED) paint(wifiLook, now);
+  else if (!linked)                  paint(lostLook, now);
+  else                               paint(cur, now);
   ring.show();
 }
 
@@ -166,16 +204,37 @@ void sendHello() {
   sendJson(d);
 }
 
+Look lookFrom(JsonVariantConst v) {                 // {c:[r,g,b], p, r, b}
+  Look L = IDLE_LOOK;
+  L.r = v["c"][0] | 0; L.g = v["c"][1] | 0; L.b = v["c"][2] | 0;
+  L.pat = patFromName(v["p"] | "solid");
+  L.rate = constrain((int)(v["r"] | 1000), 100, 5000);
+  L.lvl = constrain((int)(v["b"] | 255), 1, 255);
+  return L;
+}
+
+void saveLocal(const char *key, const Look &L, Look &slot) {
+  if (!memcmp(&L, &slot, sizeof(Look))) return;      // unchanged: spare the flash
+  slot = L;
+  prefs.begin("cuelight", false);
+  prefs.putBytes(key, &slot, sizeof(Look));
+  prefs.end();
+}
+
 void handleMessage(const char *txt, size_t len) {
   JsonDocument d;
   if (deserializeJson(d, txt, len)) return;
   const char *t = d["t"] | "";
-  if (!strcmp(t, "state")) {
-    const char *s = d["s"] | "off";
-    if (!strcmp(s, "standby"))   cue = (d["flash"] | false) ? CUE_STANDBY_FLASH : CUE_STANDBY;
-    else if (!strcmp(s, "go"))   { cue = CUE_GO; goUntil = millis() + (uint32_t)(d["ms"] | 3000); }
-    else                         cue = CUE_OFF;
-    Serial.printf("state %s flash=%d\n", s, (int)(d["flash"] | false));
+  if (!strcmp(t, "look")) {
+    cur = lookFrom(d.as<JsonVariantConst>());
+    if (cur.pat == P_COUNTDOWN && d["cd"].is<JsonObjectConst>()) {
+      cdTotal = d["cd"]["t"] | 0;
+      cdEnd = millis() + (uint32_t)(d["cd"]["l"] | 0);
+    } else { cdTotal = 0; }
+    Serial.printf("look %s\n", (const char *)(d["p"] | "?"));
+  } else if (!strcmp(t, "local")) {
+    if (d["lost"].is<JsonObjectConst>())   saveLocal("lost", lookFrom(d["lost"]), lostLook);
+    if (d["nowifi"].is<JsonObjectConst>()) saveLocal("nowifi", lookFrom(d["nowifi"]), wifiLook);
   } else if (!strcmp(t, "ident")) {
     identUntil = millis() + (uint32_t)(d["ms"] | 3000);
   } else if (!strcmp(t, "cfg")) {
@@ -193,7 +252,7 @@ void onWs(WStype_t type, uint8_t *payload, size_t len) {
     case WStype_DISCONNECTED:
       if (linked) { Serial.println("ws disconnected"); linkLostAt = millis(); }
       linked = false;
-      cue = CUE_OFF;          // never hold a stale cue
+      cur = IDLE_LOOK;        // never hold a stale cue
       break;
     case WStype_TEXT:
       handleMessage((const char *)payload, len);
@@ -274,9 +333,8 @@ void pollButton() {
   if (down && now - pressStart >= HOLD_PORTAL_MS) openPortal();
   if (!down && wasDown) {
     uint32_t held = now - pressStart;
-    if (held >= 30 && held < 1000 && (cue == CUE_STANDBY_FLASH || cue == CUE_STANDBY)) {
-      cue = CUE_STANDBY;                 // instant local feedback (stops a flash)
-      if (linked) { JsonDocument d; d["t"] = "ack"; sendJson(d); }
+    if (held >= 40 && held < 1000 && linked) {   // LXFlow decides what the ack answers
+      JsonDocument d; d["t"] = "ack"; sendJson(d);
       Serial.println("ack");
     }
   }
@@ -289,6 +347,7 @@ void setup() {
   pinMode(BTN_PIN, INPUT_PULLUP);
   pinMode(ACK_BOOT_PIN, INPUT_PULLUP);
   loadConfig();
+  loadLocalLooks();
   pHost.setValue(cfgHost, 63); pPort.setValue(cfgPort, 7); pCode.setValue(cfgCode, 31);
   pLeds.setValue(cfgLeds, 3);  pBright.setValue(cfgBright, 3);
 
@@ -332,7 +391,7 @@ void loop() {
       }
     }
   } else if (linked) {
-    linked = false; cue = CUE_OFF;
+    linked = false; cur = IDLE_LOOK;
   }
   render();
   delay(10);

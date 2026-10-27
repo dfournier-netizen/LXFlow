@@ -1,4 +1,4 @@
-# LXFlow Cue Light — firmware 1.0.1
+# LXFlow Cue Light — firmware 1.1.0
 
 One ESP32 + LED ring + button per light. Each light joins the show Wi-Fi, finds LXFlow, and shows
 standby / GO for the position the host assigns it to in LXFlow Settings.
@@ -56,18 +56,35 @@ To change settings later, **hold the button 5 seconds**.
 
 ## What the light shows
 
+Firmware 1.1 shows whatever look LXFlow sends. These are the built-in looks; change any of
+them in LXFlow Settings → Cue lights → Looks, globally or for one position.
+
+| Condition | Built-in look | When |
+|---|---|---|
+| STOP | Red strobe | Caller or host presses **STOP**; every light; until released |
+| GO | Green solid | Caller's GO onto a cue sent to this position; 3 s |
+| Countdown | Orange, ring drains | To the cue's Time, N seconds from standby, or started by hand |
+| Standby | Red flash | Standby waiting for ack (flash style) |
+| Call | White spin | Anyone calls this position; until the light's button or the screen ACK answers it |
+| Hold | Amber solid | Caller or host holds this position; until released |
+| Standby (acked) | Red solid | Acked, or steady style |
+| Missed ack | Dim red double blink | GO came before the ack; 10 s |
+| Warning | Amber pulse | N cues before the standby (set per cue) |
+| Places | Blue pulse | Caller or host presses **Places**; every light; until released |
+| No caller | One dim amber LED | No caller picked, or the caller's screen is offline |
+| Idle | One dim white LED | Connected, nothing pending |
+
+Shown by the light itself, even with LXFlow down:
+
 | Light | Meaning |
 |---|---|
-| Red, flashing | Standby, not yet acked (flash style) |
-| Red, steady | Standby (acked, or steady style) |
-| Green | GO, off after 3 s |
-| One dim white LED | Connected, nothing pending |
+| Blue breathing (default) | On Wi-Fi but lost LXFlow; any cue on it has been cleared |
+| Purple breathing (default) | No Wi-Fi |
 | White spinning | Identify (from LXFlow Settings) |
-| Blue breathing | On Wi-Fi but lost LXFlow, so any cue on it is stale and has been cleared |
-| Purple breathing | No Wi-Fi |
 | Cyan | Setup portal open |
 
-**Button:** short press acks a standby: it stops this light flashing and marks the operators at its position as acknowledged in LXFlow (in either standby style). Hold 5 s for setup.
+**Button:** short press = ack. It answers a standby first (stops the flash and marks the
+operators at this position acknowledged), otherwise a Call to this position. Hold 5 s for setup.
 
 ## Host laptop
 
