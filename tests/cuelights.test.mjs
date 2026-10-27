@@ -137,3 +137,71 @@ test('standby, ack (button and screen), GO, styles, targeting, identify, forget,
     cl.stop(); srv.close();
   }
 });
+
+test('crew acks: pending, screen ack, light button ack, missed at GO, steady-style setting', async () => {
+  const cues = [
+    { id: 'a' },
+    { id: 'b', _notify: N('LX 1', 'LX', 1) },
+    { id: 'c', _notify: N('All hands', 'all', 1) },
+    { id: 'd' },
+  ];
+  let view = { cues, idx: 0 }, pub = null;
+  const people = [{ id: 'u_lx', name: 'Sam', position: 'LX' }, { id: 'u_a2', name: 'Kim', position: 'Audio A2' }];
+  const cl = createCueLights({
+    missMs: 200, goMs: 100, discoveryPort: 0,
+    getView: () => view, getUsers: () => people, loadState: () => ({}), saveState: () => {},
+    roomCode: () => '', port: () => 7390, bindHost: () => '', onChange: s => { pub = s; },
+  });
+  const srv = http.createServer();
+  const wss = new WebSocketServer({ noServer: true });
+  srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, ws => cl.attach(ws, req)));
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  const move = async idx => { view = { cues, idx }; cl.refresh(); await wait(30); };
+  try {
+    await move(0);
+    assert.deepEqual(pub.crew, { u_lx: 'pending', u_a2: 'ok' }, 'only LX has a standby; no standby = green');
+    assert.equal(pub.ackSteady, true, 'steady style requires ack by default');
+
+    assert.equal(cl.ackUser('u_lx'), 1); await wait(20);
+    assert.equal(pub.crew.u_lx, 'ok', 'screen ack');
+
+    await move(1);                                             // GO on b; standby for c (all)
+    assert.deepEqual(pub.crew, { u_lx: 'pending', u_a2: 'pending' }, 'target all reaches everyone');
+    await move(2);                                             // GO on c without acks
+    assert.deepEqual(pub.crew, { u_lx: 'missed', u_a2: 'missed' }, 'missed the ack at GO');
+    await wait(260);
+    assert.deepEqual(pub.crew, { u_lx: 'ok', u_a2: 'ok' }, 'missed fades back to green');
+
+    // light button at LX acks the LX operator (and only them)
+    const ws = new WebSocket(`ws://127.0.0.1:${srv.address().port}/cuelight`);
+    const msgs = []; ws.on('message', m => msgs.push(JSON.parse(String(m))));
+    await new Promise(r => ws.on('open', r));
+    ws.send(JSON.stringify({ t: 'hello', id: '0A0B0C0D0E0F', fw: '1.0.1' })); await wait(40);
+    cl.configureLight('0A0B0C0D0E0F', { position: 'LX' });
+    await move(0); await wait(20);
+    assert.equal(msgs.at(-1).flash, true);
+    ws.send(JSON.stringify({ t: 'ack' })); await wait(40);
+    assert.equal(msgs.at(-1).flash, false, 'light stops flashing');
+    assert.equal(pub.crew.u_lx, 'ok', 'light button acks the operator at its position');
+
+    // screen ack also stops that position's light
+    await move(3); await move(0);
+    assert.equal(msgs.at(-1).flash, true);
+    cl.ackUser('u_lx'); await wait(30);
+    assert.equal(msgs.at(-1).flash, false, 'screen ack stops the light at their position');
+
+    // steady style: ack still required by default; the button still acks
+    await move(3); await move(0);
+    cl.setStyle('steady'); await wait(20);
+    assert.equal(pub.crew.u_lx, 'pending');
+    ws.send(JSON.stringify({ t: 'ack' })); await wait(40);
+    assert.equal(pub.crew.u_lx, 'ok', 'button acks in steady style');
+    await move(3); await move(0);
+    cl.setAckSteady(false); await wait(20);
+    assert.equal(pub.ackSteady, false);
+    assert.equal(pub.crew.u_lx, 'ok', 'steady style with no ack needed stays green');
+    await move(1);
+    assert.equal(pub.crew.u_lx, 'ok', 'and never misses');
+    ws.terminate();
+  } finally { cl.stop(); srv.close(); }
+});

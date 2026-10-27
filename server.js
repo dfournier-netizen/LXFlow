@@ -628,8 +628,9 @@ function attachUpgrade(srv) {
 }
 
 /* ---- cue lights --------------------------------------------------------- */
-// The host picks a caller; that user's pointer drives every light. Settings
-// (caller, standby style, light names/positions) persist in runofshow-config.json.
+// The host picks a caller; that user's pointer drives every light and every
+// operator's standby ack. Settings (caller, standby style, steady-style ack,
+// light names/positions) persist in runofshow-config.json.
 const cueLights = createCueLights({
   loadState: () => CONFIG.cueLights || {},
   saveState: (s) => { CONFIG.cueLights = s; saveConfig(CONFIG); },
@@ -639,6 +640,7 @@ const cueLights = createCueLights({
     const show = p && DATA.events.find(x => x.ev.id === p.eventId)?.ev.days.find(d => d.id === p.dayId)?.shows.find(s => s.id === p.showId);
     return show ? { cues: show.cues, idx: Number.isInteger(p.cueIdx) ? p.cueIdx : -1 } : null;
   },
+  getUsers: () => [...clients.values()].map(c => ({ id: c.id, name: c.name, position: c.position })),
   roomCode: () => ROOM_CODE,
   port: () => PORT,
   bindHost: () => BIND_HOST || '',
@@ -796,15 +798,16 @@ function handleMessage(ws, m) {
       ws.send(JSON.stringify({ t: 'net:set', ok: true, current: CONFIG.bindHost, adapters: adapterList(), boundNow: BIND_HOST || '' }));
       break;
     }
-    case 'cuelight:ack': {          // operator screen ack: stops their own position's light flashing
+    case 'cuelight:ack': {          // operator screen ack: their own standbys + the light at their position
       const c = clients.get(ws);
-      if (c) cueLights.ackPosition(c.position);
+      if (c) cueLights.ackUser(c.id);
       break;
     }
     case 'cuelight:set': {          // host only
       if (!ws._local) { ws.send(JSON.stringify({ t: 'error', message: 'Cue lights can only be set up on the host computer.' })); break; }
       if (m.op === 'caller') cueLights.setCaller(m.userId);
       else if (m.op === 'style') cueLights.setStyle(m.style);
+      else if (m.op === 'ackSteady') cueLights.setAckSteady(!!m.value);
       else if (m.op === 'light') cueLights.configureLight(String(m.id || ''), { name: m.name, position: m.position });
       else if (m.op === 'identify') cueLights.identify(String(m.id || ''));
       else if (m.op === 'forget') cueLights.forget(String(m.id || ''));

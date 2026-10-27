@@ -403,3 +403,22 @@ use the same explicit cell-level backgrounds. The active-cue outline remains on 
   (29/29 with the existing suite). Browser check against the bundle: settings, caller
   pick, position assign, screen ack, GO and 3 s clear all verified with simulated lights.
 
+### Crew acks + hideable sidebar — 2026-10-26
+
+- Standbys now apply to every operator on an LXFlow screen too, driven by the caller's
+  pointer and the same targeting as the pop-ups (`userMatches` = `notifyTargetsMe`).
+  `cuelights` state carries `crew: {userId: 'ok'|'pending'|'missed'}` and `ackSteady`.
+- Ack paths: `cuelight:ack` → `ackUser` (own standbys + lights at their exact position);
+  a light's button → `ackLight` (that light + operators at its exact position; `all`
+  lights never ack people). A standby still unacked when the caller GOes onto it =
+  `missed` for 10 s (`missMs`), then `ok`.
+- `ackSteady` (default on; `cuelight:set` op `ackSteady`): whether steady style still
+  needs an ack. Steady + no ack = always green, no ACK button.
+- Client: ack dot per row in `renderPresence` (`.ackdot.ok/.pending/.missed`); the
+  `#cueAck` button now shows when `crew[me.id] === 'pending'`; header **Hide sidebar**
+  toggles `body.noside` (per device, `ros_sideHidden`).
+- Firmware 1.0.1: the button acks in steady standby too (was flash only).
+- Note: the on-screen pop-ups still follow each operator's own pointer, while lights and
+  ack dots follow the caller.
+- 31/31 tests; browser check of dots (pending → ack → green, missed → green after 10 s)
+  and the sidebar toggle against the bundle.

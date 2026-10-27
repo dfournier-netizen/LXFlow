@@ -2,7 +2,8 @@
 // ESP32 cue lights connect by WebSocket on path /cuelight and are told what to show.
 // The caller's cue pointer drives them; per-cue _notify {target, lead} decides who gets
 // STANDBY (lead cues ahead) and GO (on the cue). Host chooses caller, standby style and
-// which position each light belongs to.
+// which position each light belongs to. Operators on LXFlow screens get the same
+// standbys (crew acks), so everyone can see who has acknowledged.
 
 import dgram from 'node:dgram';
 import os from 'node:os';
@@ -13,15 +14,19 @@ const STYLES = ['flash', 'steady'];
 function norm(s) { return String(s == null ? '' : s).trim().toLowerCase(); }
 
 function createCueLights(opts) {
-  const o = Object.assign({ goMs: 3000, identMs: 3000, log: () => {} }, opts);
-  // persisted: { style, caller, lights: { id: { name, position } } }
-  const st = Object.assign({ style: 'flash', caller: '', lights: {} }, o.loadState ? o.loadState() : {});
+  const o = Object.assign({ goMs: 3000, identMs: 3000, missMs: 10000, log: () => {} }, opts);
+  // persisted: { style, ackSteady, caller, lights: { id: { name, position } } }
+  const st = Object.assign({ style: 'flash', ackSteady: true, caller: '', lights: {} }, o.loadState ? o.loadState() : {});
   if (!STYLES.includes(st.style)) st.style = 'flash';
+  st.ackSteady = st.ackSteady !== false;
 
   const live = new Map();       // id -> { ws, ip, fw, sent: 'json', goUntil, goTimer }
   const acks = new Set();       // `${lightId}|${cueKey}`
   let lastIdx = null;          // caller's last cue id ('' = on show, no cue; null = no caller)
   let udp = null;
+  const userAcks = new Set();   // `${userId}|${cueKey}`
+  const missed = new Map();     // userId -> { until, timer }: missed an ack at GO
+  let pendingByUser = new Map();  // userId -> Set of unacked standby keys, as of the last refresh
 
   const save = () => { if (o.saveState) o.saveState(JSON.parse(JSON.stringify(st))); };
 
@@ -37,6 +42,56 @@ function createCueLights(opts) {
 
   const cueKey = (c, j) => (c && c.id != null ? String(c.id) : '#' + j);
   const leadOf = n => Number(n.lead) || 0;          // 0 = GO only, as in the pop-ups
+
+  // ---- crew (operators on LXFlow screens) ----
+  // Targeting is notifyTargetsMe from index.html: position or name, contains-match either way.
+  function userMatches(u, n) {
+    if (!n || !n.text) return false;
+    const t = norm(n.target || 'all');
+    if (!t || t === 'all' || t === 'everyone') return true;
+    return [norm(u.position), norm(u.name)].filter(Boolean).some(x => x === t || x.includes(t) || t.includes(x));
+  }
+  function userStandbys(u, cues, idx) {             // every live standby key for this user
+    const out = [];
+    if (idx == null || !Array.isArray(cues)) return out;
+    for (let j = Math.max(0, idx + 1); j < cues.length; j++) {
+      const c = cues[j], n = c && c._notify;
+      if (!n || leadOf(n) <= 0 || j - leadOf(n) > idx) continue;
+      if (userMatches(u, n)) out.push(cueKey(c, j));
+    }
+    return out;
+  }
+  const needsAck = () => st.style === 'flash' || st.ackSteady;
+  function users() {
+    const seen = new Map();
+    for (const u of (o.getUsers ? o.getUsers() : [])) if (u && u.id && !seen.has(u.id)) seen.set(u.id, u);
+    return [...seen.values()];
+  }
+  function pendingFor(u, v) { return needsAck() ? userStandbys(u, v.cues, v.idx).filter(k => !userAcks.has(u.id + '|' + k)) : []; }
+  function crewState(u, v) {
+    if (pendingFor(u, v).length) return 'pending';
+    const m = missed.get(u.id);
+    return m && m.until > Date.now() ? 'missed' : 'ok';
+  }
+  function updateCrew(v) {
+    const keep = new Set();
+    for (const u of users()) for (const k of userStandbys(u, v.cues, v.idx)) keep.add(u.id + '|' + k);
+    for (const a of [...userAcks]) if (!keep.has(a)) userAcks.delete(a);
+    pendingByUser = new Map(users().map(u => [u.id, new Set(pendingFor(u, v))]));
+  }
+  function markMissed(userId) {
+    const m = missed.get(userId);
+    if (m) clearTimeout(m.timer);
+    missed.set(userId, { until: Date.now() + o.missMs, timer: setTimeout(() => { missed.delete(userId); changed(); }, o.missMs + 5) });
+  }
+  function ackUsersAt(position) {                   // a light's button acks the operators at its position
+    const p = norm(position);
+    if (!p || p === 'all') return 0;
+    const v = view();
+    let n = 0;
+    for (const u of users()) if (norm(u.position) === p) for (const k of userStandbys(u, v.cues, v.idx)) { if (!userAcks.has(u.id + '|' + k)) n++; userAcks.add(u.id + '|' + k); }
+    return n;
+  }
 
   // What one light should show right now (ignoring an active GO window).
   function standbyFor(id, light, cues, idx) {
@@ -90,6 +145,9 @@ function createCueLights(opts) {
     // GO fires only when the caller MOVES onto a cue -- not when the caller is
     // picked, reconnects, or rows are inserted above the live cue.
     if (cur !== lastIdx) {
+      if (cur != null && lastIdx != null) {
+        for (const [userId, keys] of pendingByUser) if (keys.has(cur)) markMissed(userId);
+      }
       if (cur != null && lastIdx != null && cues[idx]._notify) {
         const n = cues[idx]._notify;
         for (const [id, l] of live) {
@@ -110,6 +168,7 @@ function createCueLights(opts) {
     }
     for (const a of [...acks]) if (!keep.has(a)) acks.delete(a);
     for (const id of live.keys()) push(id);
+    updateCrew({ cues, idx });
     changed();
   }
 
@@ -133,24 +192,51 @@ function createCueLights(opts) {
       return { id, name: p.name || 'Cue light ' + id.slice(-4), position: p.position || '',
         online: !!l, ip: l ? l.ip : '', fw: l ? l.fw : '', state: l ? (l.state || 'off') : 'offline' };
     });
-    return { style: st.style, caller: st.caller, lights };
+    const v = view();
+    const crew = {};
+    for (const u of users()) crew[u.id] = crewState(u, v);
+    return { style: st.style, ackSteady: st.ackSteady, caller: st.caller, lights, crew };
   }
 
-  function ackLight(id) {
+  function ackLightOnly(id) {                       // stops this light flashing
     const l = live.get(id);
     if (!l || l.state !== 'standby-flash' || !l.key) return false;
     acks.add(id + '|' + l.key);
     push(id);
-    changed();
     return true;
   }
 
-  // Operator ack from their LXFlow screen: acks the flashing lights assigned to that position.
+  // The light's own button: stops it flashing and acks the operators at its position.
+  function ackLight(id) {
+    const l = live.get(id);
+    if (!l || !l.key) return false;
+    const a = ackLightOnly(id);
+    const b = ackUsersAt((st.lights[id] || {}).position) > 0;
+    updateCrew(view()); changed();
+    return a || b;
+  }
+
+  // Lights at a position (and the operators there).
   function ackPosition(position) {
     const p = norm(position);
     if (!p) return 0;
     let n = 0;
-    for (const id of live.keys()) if (norm((st.lights[id] || {}).position) === p && ackLight(id)) n++;
+    for (const id of live.keys()) if (norm((st.lights[id] || {}).position) === p && ackLightOnly(id)) n++;
+    ackUsersAt(position);
+    updateCrew(view()); changed();
+    return n;
+  }
+
+  // An operator's on-screen ACK: their own standbys, plus the light at their position.
+  function ackUser(userId) {
+    const u = users().find(x => x.id === userId);
+    if (!u) return 0;
+    const v = view();
+    let n = 0;
+    for (const k of userStandbys(u, v.cues, v.idx)) { if (!userAcks.has(u.id + '|' + k)) n++; userAcks.add(u.id + '|' + k); }
+    const p = norm(u.position);
+    if (p) for (const id of live.keys()) if (norm((st.lights[id] || {}).position) === p) ackLightOnly(id);
+    updateCrew(v); changed();
     return n;
   }
 
@@ -191,7 +277,8 @@ function createCueLights(opts) {
   }
 
   // ---- host controls ----
-  function setStyle(s) { if (!STYLES.includes(s)) return; st.style = s; save(); for (const id of live.keys()) push(id); changed(); }
+  function setStyle(s) { if (!STYLES.includes(s)) return; st.style = s; save(); for (const id of live.keys()) push(id); updateCrew(view()); changed(); }
+  function setAckSteady(on) { st.ackSteady = !!on; save(); updateCrew(view()); changed(); }
   function setCaller(userId) { st.caller = String(userId || ''); save(); refresh(); }
   function configureLight(id, patch) {
     if (!st.lights[id]) return;
@@ -232,10 +319,11 @@ function createCueLights(opts) {
   }
   function stop() {
     if (udp) { try { udp.close(); } catch (_) {} udp = null; }
+    for (const m of missed.values()) clearTimeout(m.timer);
     for (const l of live.values()) { clearTimeout(l.goTimer); try { l.ws.close(); } catch (_) {} }
   }
 
-  return { attach, refresh, publicState, ackLight, ackPosition, setStyle, setCaller, getCaller,
+  return { attach, refresh, publicState, ackLight, ackPosition, ackUser, setStyle, setAckSteady, setCaller, getCaller,
     configureLight, identify, forget, startDiscovery, stop };
 }
 

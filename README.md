@@ -183,8 +183,12 @@ Parts, wiring, flashing and setup are in [firmware/README.md](firmware/README.md
 - Lights follow each cue's 🔔 notification exactly like the pop-ups: **Send to** picks the
   position, **Standby lead** sets how many cues ahead standby starts (0 = GO only).
   Red = standby, green = GO (off after 3 s), blue breathing = lost link (cue cleared).
-- Ack (flash style): the light's button, or the flashing **STANDBY — ACK** button on the
-  operator's screen for their own position, stops that light flashing. Nothing goes back
-  to the caller.
+- Ack: the light's button, or the flashing **STANDBY — ACK** button on the screen of any
+  operator a standby is sent to. It stops the light at their position flashing.
+- **Ack dots:** each person in the sidebar's *On this page* list has a dot: green when
+  acknowledged or nothing is pending, red while their standby is unacknowledged, and dim
+  flashing red for 10 s if the caller GOes before they ack. **Hide sidebar** in the header
+  hides the whole sidebar on that device. Settings → Cue lights → *With steady standby*
+  chooses whether steady style still needs an ack.
 - Settings persist in `runofshow-config.json` (`ROS_CONFIG` overrides the path).
 

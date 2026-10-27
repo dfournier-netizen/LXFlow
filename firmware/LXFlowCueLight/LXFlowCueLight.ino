@@ -11,7 +11,8 @@
     Ack button       -> GPIO 27 to GND (internal pull-up). The on-board BOOT button also works.
 
   Button:
-    Short press  = ack (stops this light flashing during a flashing standby)
+    Short press  = ack during a standby (stops a flashing light; marks your
+                   position acknowledged in LXFlow in either standby style)
     Hold 5 s     = open the Wi-Fi setup portal (ring turns cyan)
 
   Light patterns:
@@ -36,7 +37,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 
-#define FW_VERSION      "1.0.0"
+#define FW_VERSION      "1.0.1"
 #define LED_PIN         16
 #define BTN_PIN         27
 #define ACK_BOOT_PIN        0
@@ -273,8 +274,8 @@ void pollButton() {
   if (down && now - pressStart >= HOLD_PORTAL_MS) openPortal();
   if (!down && wasDown) {
     uint32_t held = now - pressStart;
-    if (held >= 30 && held < 1000 && cue == CUE_STANDBY_FLASH) {
-      cue = CUE_STANDBY;                 // instant local feedback
+    if (held >= 30 && held < 1000 && (cue == CUE_STANDBY_FLASH || cue == CUE_STANDBY)) {
+      cue = CUE_STANDBY;                 // instant local feedback (stops a flash)
       if (linked) { JsonDocument d; d["t"] = "ack"; sendJson(d); }
       Serial.println("ack");
     }

@@ -60,8 +60,11 @@ test('host sets caller/style/position; caller pointer drives the light; screen a
 
     // the operator's screen sees it and acks
     await until(() => op.msgs.findLast(m => m.t === 'cuelights')?.lights.some(l => l.state === 'standby-flash' && l.position === 'LX'), 'op sees flashing');
+    await until(() => op.msgs.findLast(m => m.t === 'cuelights')?.crew?.usr_lx === 'pending', 'op pending in crew');
+    assert.equal(op.msgs.findLast(m => m.t === 'cuelights').crew.usr_host, 'ok', 'caller not targeted stays green');
     op.send({ t: 'cuelight:ack' });
     await until(() => light.msgs.at(-1)?.s === 'standby' && light.msgs.at(-1).flash === false, 'acked steady');
+    await until(() => host.msgs.findLast(m => m.t === 'cuelights')?.crew?.usr_lx === 'ok', 'caller sees the ack');
 
     // an operator moving their own pointer does nothing; the caller's GO does
     op.send({ t: 'pointer', pointer: ptr('c') });
@@ -72,10 +75,13 @@ test('host sets caller/style/position; caller pointer drives the light; screen a
     assert.ok(light.msgs.at(-1).ms > 2900 && light.msgs.at(-1).ms <= 3000);
 
     // steady style persists to config
+    host.send({ t: 'cuelight:set', op: 'ackSteady', value: false });
+    await until(() => host.msgs.findLast(m => m.t === 'cuelights')?.ackSteady === false, 'ackSteady');
     host.send({ t: 'cuelight:set', op: 'style', style: 'steady' });
     await until(() => host.msgs.findLast(m => m.t === 'cuelights')?.style === 'steady', 'style');
     const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
     assert.equal(cfg.cueLights.style, 'steady');
+    assert.equal(cfg.cueLights.ackSteady, false);
     assert.equal(cfg.cueLights.caller, 'usr_host');
     assert.equal(cfg.cueLights.lights['0123456789AB'].position, 'LX');
 

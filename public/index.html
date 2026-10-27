@@ -169,6 +169,14 @@ button.mini.on{background:var(--warn);border-color:var(--warn);color:#000}
 @keyframes cueblink{50%{background:#5c1d1f}}
 @media (prefers-reduced-motion:reduce){.cueack{animation:none}}
 @media (max-width:600px){.cueack{left:auto;right:20px;bottom:calc(max(16px,env(safe-area-inset-bottom)) + 78px)}}
+.ackdot{width:12px;height:12px;border-radius:50%;flex:none;margin-left:auto;background:var(--ok);box-shadow:0 0 0 2px var(--panel2)}
+.ackdot.pending{background:#e5484d}
+.ackdot.missed{background:#e5484d;opacity:.45;animation:ackmiss 1s steps(1) infinite}
+@keyframes ackmiss{50%{opacity:.15}}
+@media (prefers-reduced-motion:reduce){.ackdot.missed{animation:none}}
+body.noside aside{display:none}
+body.noside #app{grid-template-columns:minmax(0,1fr)}
+body.noside .gobtn{right:24px}
 .clrow{display:grid;grid-template-columns:auto 1fr 1fr auto auto;gap:6px 8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
 .clrow input{min-width:0}
 .clrow .pos{grid-column:2/-1;font-size:12px}
@@ -303,6 +311,7 @@ body.mobile #app.showmode #grid td[data-key]:empty{display:none}
     <button id="undoBtn" disabled title="Undo the latest shared edit (Ctrl/Cmd+Z)">Undo</button>
     <button id="redoBtn" disabled title="Redo a shared edit (Ctrl/Cmd+Shift+Z)">Redo</button>
     </div>
+    <button id="btnSide" title="Show or hide the crew sidebar" aria-pressed="true">Sidebar</button>
     <button id="btnShow" title="Show Mode: lock editing and follow the live cue">Show Mode</button>
     <details class="workspace-tools" id="workspaceTools"><summary>Tools</summary><div class="tool-menu">
     <button id="btnUpload">Import Doc</button>
@@ -354,7 +363,7 @@ body.mobile #app.showmode #grid td[data-key]:empty{display:none}
 </div>
 
 <button id="goBtn" class="gobtn hidden">GO ▸</button>
-<button id="cueAck" class="cueack hidden" title="Stop your cue light flashing">⏱ STANDBY — ACK</button>
+<button id="cueAck" class="cueack hidden" title="Acknowledge your standby">⏱ STANDBY — ACK</button>
 
 <!-- sign-in -->
 <div id="signin" class="scrim">
@@ -431,6 +440,7 @@ let myEdit = null;        // { cueId, colKey } cell I currently hold
 let dragIdx = null;       // row index being dragged
 let notesRender = null;   // callback to refresh the open Show Notes feed
 let showMode = store.load('showMode', false);
+let sideHidden = store.load('sideHidden', false);
 let mobile = store.load('mobile', window.matchMedia('(max-width:820px)').matches);
 let selected = new Set();   // selected cue ids (current show)
 let clip = [];              // copied cue rows (clones, ids stripped)
@@ -454,7 +464,7 @@ function connect(){
     else if(m.t==='error'){ toast(m.message||'The operation could not be completed'); }
     else if(m.t==='lockDenied'){ onLockDenied(m.cueId, m.colKey, m.by); }
     else if(m.t==='net:set'){ toast(m.ok ? 'Network adapter saved \u2014 applies next time you start the app' : (m.error||'Not allowed')); }
-    else if(m.t==='cuelights'){ cueLights=m; renderCueAck(); if(cueLightsRender) cueLightsRender(); }
+    else if(m.t==='cuelights'){ cueLights=m; renderCueAck(); renderPresence(); if(cueLightsRender) cueLightsRender(); }
     else if(m.t==='joined'){ /* ack */ }
   };
   ws.onclose = ()=>{ if(!$('#app').classList.contains('hidden')) setTimeout(connect, 1000); };
@@ -638,12 +648,15 @@ function renderPresence(){
   const box=$('#presence'); box.innerHTML='';
   const fs=$('#followSel');
   fs.innerHTML='<option value="">— follow no one —</option>';
+  const ACK_TIP={ok:'Acknowledged (or no standby)',pending:'Standby not acknowledged',missed:'Missed the ack on the last GO'};
   presence.forEach(u=>{
+    const ack=(cueLights.crew&&cueLights.crew[u.id])||'ok';
     box.append(el('div',{class:'usr'},
       el('span',{class:'dot',style:`background:${u.color}`}),
       el('div',{},
         el('div',{}, u.name+(u.id===me.id?' (you)':'')),
         el('div',{class:'pos'}, u.position||'')),
+      el('span',{class:'ackdot '+ack,title:ACK_TIP[ack]||'',role:'img','aria-label':ACK_TIP[ack]||''}),
     ));
     if(u.id!==me.id) fs.append(el('option',{value:u.id}, `${u.name} — ${u.position||'?'}`));
   });
@@ -867,9 +880,14 @@ function openSettings(){
       el('option',{value:'flash'},'Flash \u2192 ack \u2192 steady, then GO'),
       el('option',{value:'steady'},'Steady standby, then GO'));
     styleSel.value=cueLights.style;
+    const ackSel=el('select',{onchange:()=>send({t:'cuelight:set',op:'ackSteady',value:ackSel.value==='1'})},
+      el('option',{value:'1'},'Operators still ack'),
+      el('option',{value:'0'},'No ack needed'));
+    ackSel.value=cueLights.ackSteady===false?'0':'1';
     clWrap.append(
       el('div',{class:'maprow'}, el('span',{class:'src'},'Caller (whose cue drives the lights)'), callerSel),
-      el('div',{class:'maprow'}, el('span',{class:'src'},'Standby style'), styleSel));
+      el('div',{class:'maprow'}, el('span',{class:'src'},'Standby style'), styleSel),
+      el('div',{class:'maprow'}, el('span',{class:'src'},'With steady standby'), ackSel));
     if(!cueLights.lights.length) clWrap.append(el('div',{class:'pos',style:'margin-top:6px'},'No cue lights yet. Power one on the same network; it appears here.'));
     cueLights.lights.forEach(l=>{
       const name=el('input',{value:l.name,placeholder:'Name',onchange:()=>send({t:'cuelight:set',op:'light',id:l.id,name:name.value})});
@@ -881,7 +899,7 @@ function openSettings(){
         el('span',{class:'dot',style:`background:${l.online?'var(--ok)':'var(--dim)'}`}), name, pos, act, el('span',{}),
         el('div',{class:'pos'}, `${CL_STATE[l.state]||l.state}${l.position?'':' \u2014 assign a position to use it'}${l.ip?' \u00b7 '+l.ip:''}${l.fw?' \u00b7 fw '+l.fw:''}`)));
     });
-    clWrap.append(el('div',{class:'pos',style:'color:var(--dim);margin-top:6px'},'Lights follow the caller\u2019s live cue and each cue\u2019s \ud83d\udd14 notification (Send to + Standby lead). A light set to "all" lights for every notification.'));
+    clWrap.append(el('div',{class:'pos',style:'color:var(--dim);margin-top:6px'},'Lights and operators follow the caller\u2019s live cue and each cue\u2019s \ud83d\udd14 notification (Send to + Standby lead). A light set to "all" lights for every notification. The dot beside each person in the sidebar is red until they ack their standby.'));
   };
   clWrap.addEventListener('focusout',()=>setTimeout(()=>{ if(cueLightsRender && !clWrap.contains(document.activeElement)) cueLightsRender(); },0));
 
@@ -1193,9 +1211,8 @@ function applyMobile(){ document.body.classList.toggle('mobile', mobile); const 
 
 /* ====================== cue light ack (operator screen) ====================== */
 function renderCueAck(){
-  const mine=String(me.position||'').trim().toLowerCase();
-  const flashing=!!mine && cueLights.lights.some(l=>l.online && l.state==='standby-flash' && String(l.position||'').trim().toLowerCase()===mine);
-  $('#cueAck')?.classList.toggle('hidden', !flashing || $('#app').classList.contains('hidden'));
+  const pending=!!(cueLights.crew && cueLights.crew[me.id]==='pending');
+  $('#cueAck')?.classList.toggle('hidden', !pending || $('#app').classList.contains('hidden'));
 }
 $('#cueAck').onclick=()=>{ send({t:'cuelight:ack'}); $('#goBtn').focus(); };
 
@@ -1306,6 +1323,9 @@ $('#renumber').onclick=renumberCues;
 $('#goBtn').onclick=()=>{advance(1); $('#goBtn').focus();};
 $('#followSel').onchange=e=>{ followId=e.target.value; firedNotes.clear(); send({t:'follow',targetId:followId}); applyFollow(); };
 $('#btnShow').onclick=()=>{ showMode=!showMode; store.save('showMode',showMode); applyShowMode(); $('#goBtn').focus(); };
+function applySidebar(){ document.body.classList.toggle('noside', sideHidden); const b=$('#btnSide'); if(b){ b.setAttribute('aria-pressed',String(!sideHidden)); b.textContent = sideHidden? 'Show sidebar' : 'Hide sidebar'; } }
+$('#btnSide').onclick=()=>{ sideHidden=!sideHidden; store.save('sideHidden',sideHidden); applySidebar(); };
+applySidebar();
 $('#tglMobile').onchange=e=>{ mobile=e.target.checked; store.save('mobile',mobile); applyMobile(); };
 $('#workspaceTools').addEventListener('click',e=>{if(e.target.closest('button'))$('#workspaceTools').open=false;});
 document.addEventListener('click',e=>{if(!e.target.closest('#workspaceTools'))$('#workspaceTools').open=false;});

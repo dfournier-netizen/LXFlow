@@ -1,4 +1,4 @@
-# LXFlow Cue Light — firmware 1.0.0
+# LXFlow Cue Light — firmware 1.0.1
 
 One ESP32 + LED ring + button per light. Each light joins the show Wi-Fi, finds LXFlow, and shows
 standby / GO for the position the host assigns it to in LXFlow Settings.
@@ -67,7 +67,7 @@ To change settings later, **hold the button 5 seconds**.
 | Purple breathing | No Wi-Fi |
 | Cyan | Setup portal open |
 
-**Button:** short press acks a flashing standby (this light only). Hold 5 s for setup.
+**Button:** short press acks a standby: it stops this light flashing and marks the operators at its position as acknowledged in LXFlow (in either standby style). Hold 5 s for setup.
 
 ## Host laptop
 
