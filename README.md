@@ -192,6 +192,10 @@ Parts, wiring, flashing and setup are in [firmware/README.md](firmware/README.md
   every condition, with optional overrides per position. **Test** shows a look on the
   lights for 3 s. Lost-link and no-Wi-Fi looks are saved on the light itself.
   Custom looks need firmware 1.1; 1.0.x lights still show standby and GO.
+- **OSC (firmware 1.2):** a light can also take OSC from Companion, grandMA3 or QLab, with
+  custom triggers and an OSC message on button press, set on the light's own page
+  (`http://<light IP>/`, linked from Settings). Each light is set to LXFlow, OSC or both.
+  See [firmware/README.md](firmware/README.md#osc-firmware-12).
 
 | Condition | Built-in look | When |
 |---|---|---|

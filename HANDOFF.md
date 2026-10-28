@@ -447,3 +447,24 @@ use the same explicit cell-level backgrounds. The active-cue outline remains on 
 - Client: sidebar *Cue lights* panel (`renderClPanel`), banners (`#clBanners`), Settings
   *Looks* editor with per-position overrides and Test, warning/countdown fields in the 🔔
   editor. 37/37 tests; browser check against the bundle with a simulated 1.1 light.
+
+### OSC on the light — firmware 1.2.0 — 2026-10-28
+
+- New tab `firmware/LXFlowCueLight/osc.ino` (+ `osc_core.h` parser/glob/builder, `web_page.h`).
+  Hooks in the main sketch only: `paint` → `paintCd`, render overlay `oscPaint`, `lightMode`
+  gating of the LXFlow link, `buttonPressed()`, `oscSetup()`/`oscLoop()`/`oscStopWeb()`,
+  `looks` message → `storeBuiltinLooks`, hello adds `mode`, `oscName`, `oscPort`.
+- Mode lxflow/osc/both (default both) is set on the light's own page (WebServer on port 80,
+  mDNS `lxflow-cuelight-xxxx.local`); stored in Preferences with OSC name/port, ack-out
+  IP/port/address/arg and triggers (JSON in `trig`, refused above 3800 bytes). Mode or port
+  change restarts the light.
+- Built-ins `/cuelight/<name|id|all>/standby|acked|go|hold|call|places|stop|warning|countdown|
+  look|off|ident`; latched ones treat a 0/False argument as off. Custom triggers are checked
+  first; first match wins.
+- LXFlow sends 1.2 lights `{t:'looks', looks:{standby,standbyAcked,go,hold,call,places,stop,
+  warning,countdown,idle}}` for the light's position (no stealth), on connect and on change.
+  Settings shows a light's OSC name/port and a **Light page** link.
+- PC tests in `firmware/test` (not in npm test): OSC core against python-osc packets shaped
+  like Companion/MA3/QLab, and `osc.ino` itself through `shim.h`. 38/38 node
+  tests. The light's page was checked in a browser against a mock API at desktop and phone
+  width. Not yet run on hardware.

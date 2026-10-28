@@ -24,6 +24,10 @@
   Patterns: solid, flash, pulse, dblink (double blink), spin, strobe, countdown
   (the ring drains to zero), dot (one LED), off. LXFlow 1.0.x-era messages are not used.
 
+  OSC (1.2): the light also listens for OSC (default UDP 8000), runs custom triggers, can
+  send an OSC message when its button is pressed, and serves its own settings page at
+  http://<light IP>/ or http://lxflow-cuelight-xxxx.local/. See osc.ino.
+
   Libraries (Arduino Library Manager): WiFiManager (tzapu) 2.0.17, WebSockets (Markus Sattler) 2.7.x,
   Adafruit NeoPixel 1.15.x, ArduinoJson 7.x. Board: esp32 by Espressif 3.x, "ESP32 Dev Module".
 */
@@ -35,8 +39,11 @@
 #include <Adafruit_NeoPixel.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+#include "osc_core.h"
 
-#define FW_VERSION      "1.1.0"
+#define FW_VERSION      "1.2.0"
 #define LED_PIN         16
 #define BTN_PIN         27
 #define ACK_BOOT_PIN        0
@@ -49,6 +56,12 @@
 // A look from LXFlow (declared up here so Arduino's generated prototypes can see it).
 enum Pat : uint8_t { P_SOLID, P_FLASH, P_PULSE, P_DBLINK, P_SPIN, P_STROBE, P_COUNTDOWN, P_DOT, P_OFF };
 struct Look { uint8_t r, g, b; uint8_t pat; uint16_t rate; uint8_t lvl; };
+enum Mode : uint8_t { M_LXFLOW, M_OSC, M_BOTH };
+enum Builtin : uint8_t { B_STANDBY, B_ACKED, B_GO, B_HOLD, B_CALL, B_PLACES, B_STOP, B_WARNING, B_COUNTDOWN, B_IDLE, B_N };
+struct Trig { char addr[96]; char val[32]; Look look; bool clear; uint16_t dur; bool btnClears; };
+uint8_t lightMode = M_BOTH;            // set on the light's web page (osc.ino)
+char oscName[24]  = "";
+uint16_t oscPort  = 8000;
 
 // ---------- config (persisted) ----------
 Preferences prefs;
@@ -140,7 +153,9 @@ uint32_t col(const Look &L, uint16_t k) {           // k = 0..255 intensity with
   return ring.Color(L.r * s / 65025, L.g * s / 65025, L.b * s / 65025);
 }
 
-void paint(const Look &L, uint32_t now) {
+void paint(const Look &L, uint32_t now) { paintCd(L, now, cdEnd, cdTotal); }
+
+void paintCd(const Look &L, uint32_t now, uint32_t cdEnd, uint32_t cdTotal) {
   ring.clear();
   uint16_t rate = L.rate < 100 ? 100 : L.rate;
   uint32_t ph = now % rate;
@@ -183,6 +198,8 @@ void render() {
   identUntil = 0;
 
   if (WiFi.status() != WL_CONNECTED) paint(wifiLook, now);
+  else if (oscPaint(now))            {}                      // an OSC look is active (osc.ino)
+  else if (lightMode == M_OSC)       paint(builtinLook(B_IDLE), now);
   else if (!linked)                  paint(lostLook, now);
   else                               paint(cur, now);
   ring.show();
@@ -201,6 +218,9 @@ void sendHello() {
   d["fw"] = FW_VERSION;
   d["leds"] = ledCount;
   d["code"] = cfgCode;
+  d["mode"] = lightMode == M_OSC ? "osc" : lightMode == M_LXFLOW ? "lxflow" : "both";
+  d["oscName"] = oscName;
+  d["oscPort"] = oscPort;
   sendJson(d);
 }
 
@@ -235,6 +255,8 @@ void handleMessage(const char *txt, size_t len) {
   } else if (!strcmp(t, "local")) {
     if (d["lost"].is<JsonObjectConst>())   saveLocal("lost", lookFrom(d["lost"]), lostLook);
     if (d["nowifi"].is<JsonObjectConst>()) saveLocal("nowifi", lookFrom(d["nowifi"]), wifiLook);
+  } else if (!strcmp(t, "looks")) {
+    storeBuiltinLooks(d["looks"]);                   // keeps OSC's built-in looks in step with LXFlow
   } else if (!strcmp(t, "ident")) {
     identUntil = millis() + (uint32_t)(d["ms"] | 3000);
   } else if (!strcmp(t, "cfg")) {
@@ -317,6 +339,7 @@ void openPortal() {
   Serial.println("opening setup portal");
   showCyan();
   if (wsStarted) { ws.disconnect(); wsStarted = false; linked = false; }
+  oscStopWeb();                         // the setup portal needs port 80
   wm.setConfigPortalTimeout(300);
   wm.startConfigPortal(apName.c_str());
   ESP.restart();                        // apply new settings cleanly
@@ -333,10 +356,7 @@ void pollButton() {
   if (down && now - pressStart >= HOLD_PORTAL_MS) openPortal();
   if (!down && wasDown) {
     uint32_t held = now - pressStart;
-    if (held >= 40 && held < 1000 && linked) {   // LXFlow decides what the ack answers
-      JsonDocument d; d["t"] = "ack"; sendJson(d);
-      Serial.println("ack");
-    }
+    if (held >= 40 && held < 1000) buttonPressed();   // osc.ino: OSC, ack-out, then LXFlow
   }
   wasDown = down;
 }
@@ -348,6 +368,7 @@ void setup() {
   pinMode(ACK_BOOT_PIN, INPUT_PULLUP);
   loadConfig();
   loadLocalLooks();
+  loadOscConfig();
   pHost.setValue(cfgHost, 63); pPort.setValue(cfgPort, 7); pCode.setValue(cfgCode, 31);
   pLeds.setValue(cfgLeds, 3);  pBright.setValue(cfgBright, 3);
 
@@ -375,13 +396,15 @@ void setup() {
   if (!wm.autoConnect(ap)) ESP.restart();   // no network found and nobody configured it: retry
 
   udp.begin(DISCOVERY_PORT + 1);
+  oscSetup();
   IPAddress ip;
-  if (cfgHost[0] && ip.fromString(cfgHost)) startWs(ip, constrain(atoi(cfgPort), 1, 65535));
+  if (lightMode != M_OSC && cfgHost[0] && ip.fromString(cfgHost)) startWs(ip, constrain(atoi(cfgPort), 1, 65535));
 }
 
 void loop() {
   pollButton();
-  if (WiFi.status() == WL_CONNECTED) {
+  oscLoop();
+  if (WiFi.status() == WL_CONNECTED && lightMode != M_OSC) {
     bool manual = cfgHost[0] != 0;
     if (wsStarted) ws.loop();
     if (!manual && !linked) {
@@ -390,7 +413,7 @@ void loop() {
         discover();
       }
     }
-  } else if (linked) {
+  } else if (linked && WiFi.status() != WL_CONNECTED) {
     linked = false; cur = IDLE_LOOK;
   }
   render();

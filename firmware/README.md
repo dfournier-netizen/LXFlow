@@ -1,4 +1,4 @@
-# LXFlow Cue Light — firmware 1.1.0
+# LXFlow Cue Light — firmware 1.2.0
 
 One ESP32 + LED ring + button per light. Each light joins the show Wi-Fi, finds LXFlow, and shows
 standby / GO for the position the host assigns it to in LXFlow Settings.
@@ -84,6 +84,54 @@ Shown by the light itself, even with LXFlow down:
 
 **Button:** short press = ack. It answers a standby first (stops the flash and marks the
 operators at this position acknowledged), otherwise a Call to this position. Hold 5 s for setup.
+
+## OSC (firmware 1.2)
+
+The light can also be driven by OSC from Companion, grandMA3, QLab or anything else, with or
+without LXFlow. Everything is set on the **light's own page**: open `http://<light IP>/` or
+`http://lxflow-cuelight-xxxx.local/` from any computer on the same network. LXFlow's
+Settings → Cue lights links to it.
+
+**Mode** (on the light's page; changing it restarts the light):
+
+| Mode | What it does |
+|---|---|
+| LXFlow and OSC (default) | Both work. An OSC look wins while it's active, then LXFlow shows again. |
+| LXFlow only | OSC is ignored. |
+| OSC only | The light never looks for LXFlow, so no blue lost-link breathing. It idles on one dim LED. |
+
+**Listening:** UDP port 8000 by default. Send to the light's IP, or broadcast to the network
+so one message reaches every light.
+
+**Built-in addresses.** `<name>` is the light's OSC name (set on its page), its 4-character
+ID, or `all`. Looks match LXFlow's once the light has been connected to LXFlow.
+
+| Address | Does |
+|---|---|
+| `/cuelight/<name>/standby` | Flashes until the button acks it, then steady |
+| `/cuelight/<name>/go [seconds]` | GO, 3 s by default |
+| `/cuelight/<name>/hold`, `/places`, `/stop`, `/warning`, `/acked` | Stays on; an argument of `0` turns it off |
+| `/cuelight/<name>/call` | Spins until the button answers it |
+| `/cuelight/<name>/countdown <seconds>` | The ring drains over that time |
+| `/cuelight/<name>/look r g b [pattern] [speed ms] [level %] [seconds]` | Any look |
+| `/cuelight/<name>/off` | Clears the OSC look |
+| `/cuelight/<name>/ident [seconds]` | Spins white |
+
+**Custom triggers** (the light's page): an OSC address (`*` and `?` wildcards), an optional
+first-argument value to match (`1` also matches `1.0` and True), a colour, pattern, speed and
+level, a duration (0 = until replaced or cleared), and whether the button clears it. The
+pattern **Clear** ends any OSC look. Triggers are checked first, top to bottom, and the first
+match wins. **Recent OSC received** lists the last 12 messages; **Make trigger** turns one into
+a row. **Test** shows a row's look without saving.
+
+**Button sends OSC:** the button sends one message to an IP and port you set. `{name}` in
+the address is replaced by the light's OSC name. A whole-number argument is sent as an int,
+a decimal as a float, anything else as text. Examples: Companion `/location/1/0/1/press`,
+grandMA3 `/cmd` with `Go+ Sequence 5`, QLab `/cue/5/go`. In LXFlow-and-OSC mode the button
+also acks in LXFlow.
+
+The light's page has no password; anyone on the same network can change it. Keep lights on
+a closed show network.
 
 ## Host laptop
 

@@ -22,6 +22,7 @@ async function rig(cues, extra = {}) {
   const wss = new WebSocketServer({ noServer: true });
   srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, ws => cl.attach(ws, req)));
   await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  ctx.port = srv.address().port;
   const light = (id, fw = '1.1.0') => new Promise(res => {
     const ws = new WebSocket(`ws://127.0.0.1:${srv.address().port}/cuelight`);
     const L = { ws, msgs: [], get last() { return this.msgs.filter(m => m.t === 'look' || m.t === 'state').at(-1); } };
@@ -201,5 +202,34 @@ test('looks: defaults, per-position overrides, stealth, preview, validation', as
     r.cl.setLook('standby', null); r.cl.setOverride('LX', 'standby', null); await wait(30);
     assert.ok(is(lx.last, 'flash', RED), 'reset to built-in');
     assert.equal(r.ctx.pub.overrides.lx, undefined);
+  } finally { r.done(); }
+});
+
+test('firmware 1.2: OSC info in the light list, looks pushed for its built-in OSC addresses', async () => {
+  const r = await rig([{ id: 'a' }]);
+  try {
+    const L = await new Promise(res => {
+      const msgs = [];
+      const c = new WebSocket(`ws://127.0.0.1:${r.ctx.port}/cuelight`);
+      c.on('message', m => msgs.push(JSON.parse(String(m))));
+      c.on('open', () => { c.send(JSON.stringify({ t: 'hello', id: '555555555555', fw: '1.2.0', mode: 'both', oscName: 'LX', oscPort: 8000 })); setTimeout(() => res({ c, msgs }), 60); });
+    });
+    const old = await r.light('666666666666', '1.1.0');
+    const looksMsg = () => L.msgs.filter(m => m.t === 'looks').at(-1);
+    assert.ok(looksMsg(), 'looks sent on connect');
+    assert.deepEqual(Object.keys(looksMsg().looks), ['standby', 'standbyAcked', 'go', 'hold', 'call', 'places', 'stop', 'warning', 'countdown', 'idle']);
+    assert.deepEqual(looksMsg().looks.go, { c: [0, 255, 0], p: 'solid', r: 1000, b: 255 });
+    assert.ok(!old.msgs.some(m => m.t === 'looks'), '1.1 lights do not get OSC looks');
+    const row = r.ctx.pub.lights.find(l => l.id === '555555555555');
+    assert.deepEqual([row.mode, row.oscName, row.oscPort], ['both', 'LX', 8000]);
+
+    r.cl.configureLight('555555555555', { position: 'LX' });
+    r.cl.setOverride('LX', 'go', { color: '#0000ff', pattern: 'pulse', rate: 2000, level: 50 });
+    await wait(40);
+    assert.deepEqual(looksMsg().looks.go, { c: [0, 0, 255], p: 'pulse', r: 2000, b: Math.round(50 * 2.55) }, 'position override reaches the light');
+    const n = L.msgs.filter(m => m.t === 'looks').length;
+    r.cl.setStealth(true); await wait(30);
+    assert.equal(L.msgs.filter(m => m.t === 'looks').length, n, 'stealth does not rewrite stored OSC looks');
+    L.c.terminate();
   } finally { r.done(); }
 });

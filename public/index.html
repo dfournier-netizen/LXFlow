@@ -965,7 +965,8 @@ function openSettings(){
         : el('button',{class:'mini',title:'Remove this offline light',onclick:()=>send({t:'cuelight:set',op:'forget',id:l.id})},'Forget');
       clWrap.append(el('div',{class:'clrow'},
         el('span',{class:'dot',style:`background:${l.online?'var(--ok)':'var(--dim)'}`}), name, pos, act, el('span',{}),
-        el('div',{class:'pos'}, `${CL_STATE[l.state]||l.state}${l.position?'':' \u2014 assign a position to use it'}${l.ip?' \u00b7 '+l.ip:''}${l.fw?' \u00b7 fw '+l.fw:''}${l.needsFlash?' \u00b7 flash firmware 1.1 for custom looks':''}`)));
+        el('div',{class:'pos'}, `${CL_STATE[l.state]||l.state}${l.position?'':' \u2014 assign a position to use it'}${l.ip?' \u00b7 '+l.ip:''}${l.fw?' \u00b7 fw '+l.fw:''}${l.needsFlash?' \u00b7 flash firmware 1.1 for custom looks':''}${l.mode&&l.mode!=='lxflow'?` \u00b7 OSC ${l.oscName||l.id.slice(-4)} on port ${l.oscPort}`:''} `,
+          l.online&&l.mode ? el('a',{href:`http://${l.ip}/`,target:'_blank',rel:'noopener'},'Light page') : '')));
     });
     renderLooks();
     clWrap.append(el('div',{class:'pos',style:'color:var(--dim);margin-top:6px'},'Lights and operators follow the caller\u2019s live cue and each cue\u2019s \ud83d\udd14 notification (Send to + Standby lead). A light set to "all" lights for every notification. The dot beside each person in the sidebar is red until they ack their standby.'));

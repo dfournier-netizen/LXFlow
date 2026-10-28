@@ -8,7 +8,8 @@
 //
 // Every condition shows a "look" (colour, pattern, speed, level) that the host can
 // edit, with optional per-position overrides. Firmware 1.1+ renders looks; 1.0.x
-// lights get the old standby/GO/off messages.
+// lights get the old standby/GO/off messages. Firmware 1.2+ also takes OSC on its own
+// and is sent its position's looks so its built-in OSC addresses match LXFlow's.
 
 import dgram from 'node:dgram';
 import os from 'node:os';
@@ -293,6 +294,22 @@ function createCueLights(opts) {
     const pack = k => { const w = wire(look(k, '')); return { c: w.c, p: w.p, r: w.r, b: w.b }; };
     send(l.ws, { t: 'local', lost: pack('lost'), nowifi: pack('nowifi') });
   }
+  // Firmware 1.2: the looks its built-in OSC addresses use (this light's position, no stealth).
+  const OSC_LOOKS = ['standby', 'standbyAcked', 'go', 'hold', 'call', 'places', 'stop', 'warning', 'countdown', 'idle'];
+  function oscLooks(id) {
+    const l = live.get(id);
+    if (!l || !l.v12) return;
+    const pos = (st.lights[id] || {}).position;
+    const looks = {};
+    for (const k of OSC_LOOKS) {
+      const lk = look(k, pos), n = parseInt(lk.color.slice(1), 16);
+      looks[k] = { c: [(n >> 16) & 255, (n >> 8) & 255, n & 255], p: lk.pattern, r: lk.rate, b: Math.max(1, Math.round(lk.level * 2.55)) };
+    }
+    const sig = JSON.stringify(looks);
+    if (sig === l.oscSent) return;
+    l.oscSent = sig;
+    send(l.ws, { t: 'looks', looks });
+  }
 
   // view(): the caller's show and pointer. idx null = no caller / caller offline;
   // -1 = caller is on the show with no active cue (standby for cue 1 still shows).
@@ -378,7 +395,8 @@ function createCueLights(opts) {
       const p = st.lights[id] || {}, l = live.get(id);
       const state = !l ? 'offline' : l.cond === 'standby' ? 'standby-flash' : l.cond === 'standbyAcked' ? 'standby' : (l.cond || 'idle');
       return { id, name: p.name || 'Cue light ' + id.slice(-4), position: p.position || '',
-        online: !!l, ip: l ? l.ip : '', fw: l ? l.fw : '', needsFlash: !!l && !l.v11, state };
+        online: !!l, ip: l ? l.ip : '', fw: l ? l.fw : '', needsFlash: !!l && !l.v11, state,
+        mode: l ? l.mode : '', oscName: l ? l.oscName : '', oscPort: l ? l.oscPort : 0 };
     });
     const v = view();
     const crew = {}, crewCd = {}, crewWarn = {};
@@ -502,10 +520,12 @@ function createCueLights(opts) {
         const old = live.get(id);
         if (old) { clearTimeout(old.goTimer); try { old.ws.close(4002, 'replaced'); } catch (_) {} }
         const fw = String(m.fw || '');
-        live.set(id, { ws, ip, fw, v11: fwAtLeast(fw, '1.1.0'), sent: null, goUntil: 0, missedUntil: 0 });
+        live.set(id, { ws, ip, fw, v11: fwAtLeast(fw, '1.1.0'), v12: fwAtLeast(fw, '1.2.0'), sent: null, goUntil: 0, missedUntil: 0,
+          mode: ['lxflow', 'osc', 'both'].includes(m.mode) ? m.mode : '', oscName: String(m.oscName || '').slice(0, 23), oscPort: Number(m.oscPort) || 0 });
         if (!st.lights[id]) { st.lights[id] = { name: '', position: '' }; save(); }
         o.log(`cue light ${id} connected from ${ip} (fw ${fw || '?'})`);
         localLooks(live.get(id));
+        oscLooks(id);
         push(id, true);
         changed();
         return;
@@ -532,11 +552,12 @@ function createCueLights(opts) {
     if (!st.lights[id]) return;
     if (patch.name != null) st.lights[id].name = String(patch.name).slice(0, 40);
     if (patch.position != null) st.lights[id].position = String(patch.position).slice(0, 40);
-    save(); refresh();
+    save(); oscLooks(id); refresh();
   }
   function relook(localChanged) {
     save();
     if (localChanged) for (const l of live.values()) localLooks(l);
+    for (const id of live.keys()) oscLooks(id);
     repaint();
   }
   // Global look for a condition (null = back to the built-in default).
