@@ -1,4 +1,4 @@
-// Just enough Arduino to run osc.ino's logic on a PC.
+// Just enough Arduino to run osc.ino's (and trigger_inputs.ino's) logic on a PC.
 #pragma once
 #include <string>
 #include <map>
@@ -26,6 +26,13 @@ struct IPAddress {
   bool fromString(const char *s) { int a, c, d, e; if (sscanf(s, "%d.%d.%d.%d", &a, &c, &d, &e) != 4) return false; *this = IPAddress(a, c, d, e); return true; }
   String toString() const { char t[16]; snprintf(t, 16, "%d.%d.%d.%d", b[0], b[1], b[2], b[3]); return String(t); }
 };
+#define INPUT_PULLUP 5
+#define LOW 0
+#define HIGH 1
+static int pinLevel[40];
+static inline void pinMode(int p, int) { pinLevel[p] = HIGH; }
+static inline int digitalRead(int p) { return pinLevel[p]; }
+static inline void delayMicroseconds(int) {}
 struct SerialT { void println(const char *) {} template <class... A> void printf(const char *, A...) {} } Serial;
 struct Sent { std::string ip; int port; std::vector<uint8_t> data; };
 static std::vector<Sent> udpSent;

@@ -1,4 +1,4 @@
-# LXFlow Cue Light — firmware 1.2.0
+# LXFlow Cue Light — firmware 1.3.0
 
 One ESP32 + LED ring + button per light. Each light joins the show Wi-Fi, finds LXFlow, and shows
 standby / GO for the position the host assigns it to in LXFlow Settings.
@@ -14,6 +14,7 @@ standby / GO for the position the host assigns it to in LXFlow Settings.
 | 1 | 470–1000 µF 10 V electrolytic across ring 5V/GND (optional, protects the ring at power-up) | any | ~$0.30 |
 | 1 | USB cable (micro-USB or USB-C to match the board) + 5 V USB supply | on hand | — |
 | — | Hookup wire, 3D-printed housing with a diffuser over the ring | on hand | — |
+| 2 | 3.5 mm mono (TS) panel-mount jack, for the contact inputs (optional, 1.3) | any | — |
 
 Generic ESP32 boards and WS2812 rings from Amazon/AliExpress bring it to roughly $8–12 a light.
 Prices are list price for one; Adafruit discounts at 10+. The CP2102 or CH340 USB chip on
@@ -26,6 +27,8 @@ ESP32 GPIO 16 ──[330 Ω]── ring DIN
 ESP32 VIN (5 V) ───────── ring 5V / VCC
 ESP32 GND ─────────────── ring GND
 ESP32 GPIO 27 ──── button ──── GND
+ESP32 GPIO 32 ──── jack 1 tip      jack 1 sleeve ──── GND   (contact input 1, optional)
+ESP32 GPIO 33 ──── jack 2 tip      jack 2 sleeve ──── GND   (contact input 2, optional)
 ```
 
 The on-board BOOT button also works as the ack button, so you can bench-test with nothing wired except the ring.
@@ -132,6 +135,28 @@ also acks in LXFlow.
 
 The light's page has no password; anyone on the same network can change it. Keep lights on
 a closed show network.
+
+## Contact inputs (firmware 1.3)
+
+Two dry-contact inputs on 3.5 mm mono (TS) jacks: a switch, footswitch or relay contact
+between tip and sleeve. Input 1 is GPIO 32, input 2 is GPIO 33. The ESP32's internal
+pull-ups are enough for cable runs under about 3 m. **Dry contacts only: never connect a
+voltage to these pins.** A stereo plug works too (its ring is simply grounded).
+
+Each input is set on the light's own page, under **Contact inputs**:
+
+| Setting | What it does |
+|---|---|
+| Fires when | Off, the contact closes, or the contact opens |
+| Colour, pattern, speed, level | The look to show. Pattern **Clear** ends any OSC look instead. |
+| Seconds | How long the look shows (0 = until cleared). A new closure restarts the time; holding the contact closed doesn't repeat it. |
+| Button clears | The ack button ends the look early |
+| Sends OSC address, argument | Optional. Sent to the IP and port under **Button sends OSC**; `{name}` = this light. Not sent in LXFlow-only mode. |
+
+The look shows on top of LXFlow while it lasts, the same as an OSC trigger, and works in
+every mode. The Input column shows each one as Open or Closed live, inputs appear in the recent-OSC
+list, and **Test** runs a row (look and OSC) without saving it. Contacts are debounced
+(30 ms) and the state at power-up never fires.
 
 ## Host laptop
 

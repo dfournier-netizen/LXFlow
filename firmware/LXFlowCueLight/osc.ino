@@ -16,6 +16,8 @@
   Custom triggers (web page) are checked first: address with * and ? wildcards, optional
   first-argument match, a look, a duration (0 = until replaced or cleared) and whether
   the button clears it. The pattern "clear" ends any OSC look.
+
+  The two contact inputs (trigger_inputs.ino, 1.3) are stored and served from here too.
 */
 
 #define MAX_TRIG  24
@@ -131,8 +133,10 @@ void loadOscConfig() {
   prefs.getString("aarg", ackArg, sizeof ackArg);
   if (prefs.getBytesLength("bl") == sizeof(blLooks)) prefs.getBytes("bl", blLooks, sizeof(blLooks));
   String tj = prefs.getString("trig", "[]");
+  String gj = prefs.getString("gpi", "[]");
   prefs.end();
   loadTriggers(tj.c_str());
+  gpiLoadJson(gj.c_str());
 }
 
 void saveOscConfig() {
@@ -145,6 +149,7 @@ void saveOscConfig() {
   prefs.putString("aaddr", ackAddr);
   prefs.putString("aarg", ackArg);
   prefs.putString("trig", triggersJson());
+  prefs.putString("gpi", gpiJson());
   prefs.end();
 }
 
@@ -254,21 +259,23 @@ void pollOsc() {
 }
 
 // ---------- ack out ----------
-bool sendAckOut() {
+// Sends one OSC message to the "Button sends OSC" IP and port. {name} = this light.
+bool sendOscOut(const char *tmpl, const char *arg) {
   IPAddress ip;
-  if (!ackIp[0] || !ip.fromString(ackIp) || !ackAddr[0]) return false;
+  if (!ackIp[0] || !ip.fromString(ackIp) || !tmpl[0]) return false;
   char addr[128];
-  const char *tok = strstr(ackAddr, "{name}");
+  const char *tok = strstr(tmpl, "{name}");
   const char *nm = oscName[0] ? oscName : shortId();
-  if (tok) snprintf(addr, sizeof addr, "%.*s%s%s", (int)(tok - ackAddr), ackAddr, nm, tok + 6);
-  else strlcpy(addr, ackAddr, sizeof addr);
+  if (tok) snprintf(addr, sizeof addr, "%.*s%s%s", (int)(tok - tmpl), tmpl, nm, tok + 6);
+  else strlcpy(addr, tmpl, sizeof addr);
   uint8_t pkt[192];
-  int len = oscBuild(pkt, sizeof pkt, addr, ackArg);
+  int len = oscBuild(pkt, sizeof pkt, addr, arg);
   if (!len) return false;
   oscUdp.beginPacket(ip, ackPort);
   oscUdp.write(pkt, len);
   return oscUdp.endPacket();
 }
+bool sendAckOut() { return sendOscOut(ackAddr, ackArg); }
 
 // Short press of the ack button (from pollButton).
 void buttonPressed() {
@@ -294,6 +301,7 @@ void apiState() {
   d["ackIp"] = ackIp; d["ackPort"] = ackPort; d["ackAddr"] = ackAddr; d["ackArg"] = ackArg;
   d["showing"] = oscSt.on ? oscSt.what : (lightMode == M_OSC ? "idle" : linked ? "LXFlow" : "looking for LXFlow");
   JsonDocument t; deserializeJson(t, triggersJson()); d["triggers"] = t;
+  gpiState(d);
   JsonArray lg = d["log"].to<JsonArray>();
   for (uint8_t k = 0; k < logCount; k++) {
     LogRow &r = oscLog[(logHead + OSC_LOG - 1 - k) % OSC_LOG];
@@ -318,6 +326,7 @@ void apiConfig() {
   strlcpy(ackArg, d["ackArg"] | "", sizeof ackArg);
   String tj; serializeJson(d["triggers"], tj);
   loadTriggers(tj.c_str());
+  if (d["inputs"].is<JsonArrayConst>()) { String gj; serializeJson(d["inputs"], gj); gpiLoadJson(gj.c_str()); }
   if (triggersJson().length() > 3800) {                   // NVS strings top out near 4000 bytes
     loadOscConfig();
     web.send(400, "application/json", "{\"ok\":false,\"error\":\"Too many triggers to store. Shorten addresses or remove some.\"}");
@@ -339,6 +348,12 @@ void apiTest() {
   else if (!strcmp(what, "trigger")) {                     // preview a row without saving it
     Trig T;
     if (parseTrigger(d["trigger"], T)) fireTrigger(T, did, sizeof did);
+  }
+  else if (!strcmp(what, "input")) {                       // preview an input row: look + its OSC
+    Gpi G; parseGpi(d["input"], G);
+    bool sent = gpiFire(constrain((int)(d["n"] | 0), 0, 1), G, "test from this page");
+    web.send(200, "application/json", sent ? "{\"ok\":true,\"osc\":true}" : "{\"ok\":true,\"osc\":false}");
+    return;
   }
   web.send(200, "application/json", "{\"ok\":true}");
 }

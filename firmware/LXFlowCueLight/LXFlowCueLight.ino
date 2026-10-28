@@ -10,6 +10,7 @@
     WS2812 ring DIN  -> GPIO 16 (through a 330 ohm resistor)
     WS2812 ring 5V   -> VIN (USB 5V)       WS2812 GND -> GND
     Ack button       -> GPIO 27 to GND (internal pull-up). The on-board BOOT button also works.
+    Contact input 1  -> GPIO 32 to GND, input 2 -> GPIO 33 to GND (dry contact only; 1.3)
 
   Button:
     Short press  = ack: LXFlow decides what it answers (a standby first, else a CALL)
@@ -28,6 +29,9 @@
   send an OSC message when its button is pressed, and serves its own settings page at
   http://<light IP>/ or http://lxflow-cuelight-xxxx.local/. See osc.ino.
 
+  Contact inputs (1.3): two dry-contact inputs that show a look for a set time and can
+  send an OSC message, set on the same page. See trigger_inputs.ino.
+
   Libraries (Arduino Library Manager): WiFiManager (tzapu) 2.0.17, WebSockets (Markus Sattler) 2.7.x,
   Adafruit NeoPixel 1.15.x, ArduinoJson 7.x. Board: esp32 by Espressif 3.x, "ESP32 Dev Module".
 */
@@ -43,7 +47,7 @@
 #include <ESPmDNS.h>
 #include "osc_core.h"
 
-#define FW_VERSION      "1.2.0"
+#define FW_VERSION      "1.3.0"
 #define LED_PIN         16
 #define BTN_PIN         27
 #define ACK_BOOT_PIN        0
@@ -59,6 +63,7 @@ struct Look { uint8_t r, g, b; uint8_t pat; uint16_t rate; uint8_t lvl; };
 enum Mode : uint8_t { M_LXFLOW, M_OSC, M_BOTH };
 enum Builtin : uint8_t { B_STANDBY, B_ACKED, B_GO, B_HOLD, B_CALL, B_PLACES, B_STOP, B_WARNING, B_COUNTDOWN, B_IDLE, B_N };
 struct Trig { char addr[96]; char val[32]; Look look; bool clear; uint16_t dur; bool btnClears; };
+struct Gpi { Trig t; uint8_t when; };   // contact input: t.addr/t.val = OSC sent; when = off/close/open
 uint8_t lightMode = M_BOTH;            // set on the light's web page (osc.ino)
 char oscName[24]  = "";
 uint16_t oscPort  = 8000;
@@ -399,10 +404,12 @@ void setup() {
   oscSetup();
   IPAddress ip;
   if (lightMode != M_OSC && cfgHost[0] && ip.fromString(cfgHost)) startWs(ip, constrain(atoi(cfgPort), 1, 65535));
+  gpiSetup();                           // trigger_inputs.ino
 }
 
 void loop() {
   pollButton();
+  gpiLoop();
   oscLoop();
   if (WiFi.status() == WL_CONNECTED && lightMode != M_OSC) {
     bool manual = cfgHost[0] != 0;

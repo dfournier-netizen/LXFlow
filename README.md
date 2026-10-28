@@ -196,6 +196,9 @@ Parts, wiring, flashing and setup are in [firmware/README.md](firmware/README.md
   custom triggers and an OSC message on button press, set on the light's own page
   (`http://<light IP>/`, linked from Settings). Each light is set to LXFlow, OSC or both.
   See [firmware/README.md](firmware/README.md#osc-firmware-12).
+- **Contact inputs (firmware 1.3):** two dry-contact inputs on 3.5 mm jacks that show a look
+  for a set time and can send an OSC message, set on the light's page. See
+  [firmware/README.md](firmware/README.md#contact-inputs-firmware-13).
 
 | Condition | Built-in look | When |
 |---|---|---|

@@ -1,6 +1,6 @@
 # Firmware tests (run on a PC)
 
-These check the OSC code without an ESP32. They are not part of `npm test`.
+These check the OSC and contact-input code without an ESP32. They are not part of `npm test`.
 
 ```
 cd firmware/test
@@ -11,5 +11,6 @@ g++ -std=c++17 -w -I <Arduino libraries>/ArduinoJson/src -o osc_logic_test osc_l
 ```
 
 `osc_core_test` covers the OSC parser, wildcard matching and message building.
-`osc_logic_test` runs `osc.ino` itself through a small Arduino shim (`shim.h`): built-in
-addresses, custom triggers, the button, OSC ack-out, modes, storage limits and looks from LXFlow.
+`osc_logic_test` runs `osc.ino` and `trigger_inputs.ino` themselves through a small Arduino
+shim (`shim.h`): built-in addresses, custom triggers, the button, OSC ack-out, modes, storage
+limits, looks from LXFlow, and the contact inputs (debounce, close/open, hold time, OSC out).

@@ -1,4 +1,4 @@
-// The light's own settings page, served at http://<light IP>/ (firmware 1.2).
+// The light's own settings page, served at http://<light IP>/ (firmware 1.2; contact inputs 1.3).
 #pragma once
 const char PAGE_HTML[] = R"HTML(<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -22,6 +22,7 @@ td input:not([type=checkbox]):not([type=color]),td select{width:100%}
 code{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(--panel2);padding:1px 5px;border-radius:5px}
 .cheat{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 16px;font-size:13px}
 #msg{min-height:1.4em}.ok{color:var(--ok)}.bad{color:var(--bad)}
+.state{font-weight:600}.state.on{color:var(--ok)}
 .bar{position:sticky;bottom:0;background:var(--bg);padding:10px 0;display:flex;gap:10px;align-items:center}
 </style></head><body><main>
 <header><h1 id="title">LXFlow Cue Light</h1><div class="meta" id="meta">Loading…</div></header>
@@ -44,6 +45,11 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(-
 <button id="ackTest" type="button">Send test</button>
 </div>
 <p class="meta">Examples: Companion <code>/location/1/0/1/press</code>, grandMA3 <code>/cmd</code> with argument <code>Go+ Sequence 5</code>, QLab <code>/cue/5/go</code>. A whole number is sent as an int, a decimal as a float, anything else as text.</p>
+</section>
+
+<section><h2>Contact inputs</h2>
+<p class="meta">Two dry-contact inputs on 3.5 mm jacks (tip and sleeve): input 1 is GPIO 32, input 2 is GPIO 33. When one fires it shows its look for the set seconds (0 = until cleared) and sends its OSC message, if it has one, to the IP and port under <b>Button sends OSC</b>. OSC is not sent in LXFlow-only mode. Dry contacts only: never connect a voltage.</p>
+<div class="tbl"><table id="inputs"><thead><tr><th>Input</th><th>Fires when</th><th>Colour</th><th>Pattern</th><th>Speed</th><th>Level %</th><th>Seconds</th><th>Button clears</th><th></th></tr></thead></table></div>
 </section>
 
 <section><h2>Custom triggers</h2>
@@ -100,6 +106,29 @@ function trigRow(t){
   tr.addEventListener('input',markDirty);tr.addEventListener('change',markDirty);
   return tr;
 }
+function gpiRow(t,i){
+  t=Object.assign({w:'off',c:'#ffffff',p:'solid',r:1000,l:100,d:5,k:false,a:'',v:''},t);
+  const when=el('select',{'data-k':'w'},el('option',{value:'off'},'Off'),el('option',{value:'close'},'Contact closes'),el('option',{value:'open'},'Contact opens'));when.value=t.w;
+  const pat=el('select',{'data-k':'p'},...PATS.map(p=>el('option',{value:p},PAT_LABEL[p])));pat.value=t.p;
+  const sp=el('select',{'data-k':'r'},...SPEEDS.map(([ms,l])=>el('option',{value:String(ms)},l)));
+  if(!SPEEDS.some(([ms])=>ms===t.r))sp.append(el('option',{value:String(t.r)},t.r+' ms'));sp.value=String(t.r);
+  const tb=el('tbody',{},el('tr',{},
+    el('td',{style:'white-space:nowrap'},String(i+1)+' ',el('span',{id:'gs'+i,class:'state'+(t.closed?' on':'')},t.closed?'Closed':'Open')),
+    el('td',{},when),
+    el('td',{},el('input',{type:'color',value:t.c,'data-k':'c'})),
+    el('td',{},pat),
+    el('td',{},sp),
+    el('td',{},el('input',{type:'number',min:'1',max:'100',value:String(t.l),'data-k':'l',style:'width:70px'})),
+    el('td',{},el('input',{type:'number',min:'0',max:'3600',value:String(t.d),'data-k':'d',style:'width:70px'})),
+    el('td',{},el('input',{type:'checkbox',checked:!!t.k,'data-k':'k'})),
+    el('td',{},el('button',{type:'button',onclick:()=>testInput(tb,i)},'Test'))),
+    el('tr',{},el('td',{style:'border-top:0'}),el('td',{colspan:'8',style:'border-top:0'},el('div',{class:'row'},
+      el('label',{},'Sends OSC address ({name} = this light)',el('input',{value:t.a,placeholder:'blank = none','data-k':'a'})),
+      el('label',{},'Argument',el('input',{value:t.v,placeholder:'optional','data-k':'v'}))))));
+  tb.addEventListener('input',markDirty);tb.addEventListener('change',markDirty);
+  return tb;
+}
+async function testInput(tr,i){const r=await post('/api/test',{what:'input',n:i,input:rowData(tr)});msg(r.osc?'Showing that look and sent the OSC message.':rowData(tr).a?'Showing that look. The OSC message was not sent: check the IP and port under Button sends OSC (and Save), and that the mode is not LXFlow only.':'Showing that look on the light.',true);}
 function rowData(tr){const o={};tr.querySelectorAll('[data-k]').forEach(i=>{const k=i.dataset.k;o[k]=i.type==='checkbox'?i.checked:(['r','l','d'].includes(k)?+i.value:i.value.trim());});return o;}
 async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.json();}
 async function test(tr){const t=rowData(tr);if(!t.a){msg('Give the trigger an OSC address first.',false);return;}await post('/api/test',{what:'trigger',trigger:t});msg('Showing that look on the light.',true);}
@@ -107,12 +136,14 @@ function fill(s){
   $('#mode').value=s.mode;$('#oscName').value=s.oscName;$('#oscPort').value=s.oscPort;
   $('#ackIp').value=s.ackIp;$('#ackPort').value=s.ackPort;$('#ackAddr').value=s.ackAddr;$('#ackArg').value=s.ackArg;
   const tb=$('#trigs');tb.innerHTML='';(s.triggers||[]).forEach(t=>tb.append(trigRow(t)));
+  const ib=$('#inputs');[...ib.tBodies].forEach(x=>x.remove());(s.inputs||[]).forEach((t,i)=>ib.append(gpiRow(t,i)));
 }
 function status(s){
   $('#title').textContent='Cue light '+s.short+(s.oscName?' · '+s.oscName:'');
   $('#meta').innerHTML='';
   $('#meta').append('Firmware '+s.fw+' · IP ',el('b',{},s.ip),' · '+s.host.toLowerCase()+'.local · Wi-Fi '+s.rssi+' dBm · LXFlow: '+(s.mode==='osc'?'off (OSC only)':s.linked?'connected '+s.lxflow:'not connected')+' · showing: '+s.showing+(s.mode!=='lxflow'&&!s.oscUp?' · OSC port did not open':''));
   $('#sendTo').textContent=s.ip+' port '+s.oscPort;
+  (s.inputs||[]).forEach((g,i)=>{const e=$('#gs'+i);if(e){e.textContent=g.closed?'Closed':'Open';e.className='state'+(g.closed?' on':'');}});
   const lg=$('#log');lg.innerHTML='';
   if(!s.log.length)lg.append(el('tr',{},el('td',{colspan:'6',class:'meta'},s.mode==='lxflow'?'OSC is off in LXFlow-only mode.':'Nothing yet. Send something from your console or Companion.')));
   s.log.forEach(r=>lg.append(el('tr',{},el('td',{},r.ago+' s ago'),el('td',{},r.a),el('td',{},r.v),el('td',{},r.from),el('td',{},r.did),
@@ -129,7 +160,8 @@ document.querySelectorAll('section input,section select').forEach(i=>{i.addEvent
 $('#save').onclick=async()=>{
   const body={mode:$('#mode').value,oscName:$('#oscName').value.trim(),oscPort:+$('#oscPort').value||8000,
     ackIp:$('#ackIp').value.trim(),ackPort:+$('#ackPort').value||8000,ackAddr:$('#ackAddr').value.trim(),ackArg:$('#ackArg').value.trim(),
-    triggers:[...$('#trigs').children].map(rowData).filter(t=>t.a)};
+    triggers:[...$('#trigs').children].map(rowData).filter(t=>t.a),
+    inputs:[...$('#inputs').tBodies].map(rowData)};
   try{const r=await post('/api/config',body);
     if(!r.ok){msg(r.error||'Could not save.',false);return;}
     dirty=false;

@@ -6,12 +6,13 @@
 #include <iostream>
 #include <fstream>
 // --- the pieces of LXFlowCueLight.ino that osc.ino uses ---
-#define FW_VERSION "1.2.0"
+#define FW_VERSION "1.3.0"
 enum Pat : uint8_t { P_SOLID, P_FLASH, P_PULSE, P_DBLINK, P_SPIN, P_STROBE, P_COUNTDOWN, P_DOT, P_OFF };
 struct Look { uint8_t r, g, b; uint8_t pat; uint16_t rate; uint8_t lvl; };
 enum Mode : uint8_t { M_LXFLOW, M_OSC, M_BOTH };
 enum Builtin : uint8_t { B_STANDBY, B_ACKED, B_GO, B_HOLD, B_CALL, B_PLACES, B_STOP, B_WARNING, B_COUNTDOWN, B_IDLE, B_N };
 struct Trig { char addr[96]; char val[32]; Look look; bool clear; uint16_t dur; bool btnClears; };
+struct Gpi { Trig t; uint8_t when; };
 uint8_t lightMode = M_BOTH; char oscName[24] = ""; uint16_t oscPort = 8000;
 Preferences prefs; String deviceId = "A1B2C3D4E5F6", apName = "LXFlow-CueLight-E5F6";
 const Look IDLE_LOOK = { 255, 255, 255, P_DOT, 1000, 25 };
@@ -24,7 +25,10 @@ Look painted; bool paintedSet = false;
 void paintCd(const Look &L, uint32_t, uint32_t, uint32_t) { painted = L; paintedSet = true; }
 // forward declarations Arduino would generate
 void oscClear(); bool oscPaint(uint32_t); void onOsc(const char *, const OscArg *, int, void *); void buttonPressed(); void loadOscConfig(); void apiConfig(); bool sendAckOut();
+bool sendOscOut(const char *, const char *); void gpiLoadJson(const char *); String gpiJson(); void gpiState(JsonDocument &);
+bool parseGpi(JsonVariantConst, Gpi &); bool gpiFire(uint8_t, const Gpi &, const char *);
 #include "../LXFlowCueLight/osc.ino"
+#include "../LXFlowCueLight/trigger_inputs.ino"
 // --- tests ---
 int fails = 0;
 #define CHECK(c, m) do { if (!(c)) { std::cout << "FAIL " << m << "\n"; fails++; } else std::cout << "ok   " << m << "\n"; } while (0)
@@ -115,6 +119,45 @@ int main() {
   storeBuiltinLooks(lk.as<JsonVariantConst>());
   send("/cuelight/all/go");
   CHECK(lookIs(P_PULSE, 0, 0, 255), "built-in go uses the look LXFlow sent");
+  // contact inputs (1.3)
+  send("/cuelight/all/off");
+  gpiSetup();
+  CHECK(gpis[0].when == G_OFF && gpis[0].t.dur == 5, "inputs default to off, 5 s");
+  config(R"({"mode":"both","oscName":"LX","oscPort":8000,"ackIp":"10.0.0.9","ackPort":8000,"ackAddr":"","ackArg":"","triggers":[],"inputs":[
+    {"w":"close","c":"#00ff00","p":"flash","r":500,"l":100,"d":4,"k":false,"a":"/cuelight/{name}/input1","v":"1"},
+    {"w":"open","c":"#ff0000","p":"solid","r":1000,"l":50,"d":0,"k":true,"a":"","v":""}]})");
+  CHECK(gpis[0].when == G_CLOSE && gpis[1].when == G_OPEN && Preferences::store["gpi"].find("input1") != std::string::npos, "inputs saved");
+  auto step = [](int ms) { for (int t = 0; t < ms; t += 10) { fakeMillis += 10; gpiLoop(); } };
+  size_t sent0 = udpSent.size();
+  pinLevel[32] = LOW; step(20);
+  CHECK(!oscSt.on, "input 1: no fire before 30 ms debounce");
+  step(30);
+  CHECK(lookIs(P_FLASH, 0, 255, 0) && !strcmp(oscSt.what, "input 1"), "input 1 closes -> green flash");
+  CHECK(udpSent.size() == sent0 + 1 && udpSent.back().ip == "10.0.0.9", "input 1 sends OSC");
+  { std::string got; auto &d = udpSent.back().data; oscParse(d.data(), (int)d.size(), [](const char *a, const OscArg *x, int n, void *ctx) { auto *g = (std::string *)ctx; *g = a; if (n) *g += " " + std::to_string(x[0].i); }, &got);
+    CHECK(got == "/cuelight/LX/input1 1", "input OSC is /cuelight/LX/input1 1: " + got); }
+  step(2000);
+  CHECK(udpSent.size() == sent0 + 1, "held closed: fires once");
+  pinLevel[32] = HIGH; step(100); pinLevel[32] = LOW; step(100);
+  CHECK(udpSent.size() == sent0 + 2 && oscSt.until == millis() - 60 + 4000, "a new closure restarts the time");
+  fakeMillis += 4100;
+  CHECK(!oscPaint(millis()), "input look ends after its seconds");
+  pinLevel[33] = LOW; step(50);
+  CHECK(!oscSt.on, "input 2 set to fire on open: closing does nothing");
+  pinLevel[33] = HIGH; step(50);
+  CHECK(lookIs(P_SOLID, 255, 0, 0) && painted.lvl == pct255(50) && oscSt.until == 0, "input 2 opens -> red 50%, until cleared");
+  CHECK(udpSent.size() == sent0 + 2, "input 2 has no OSC address: nothing sent");
+  buttonPressed();
+  CHECK(!oscSt.on, "button clears input 2");
+  pinLevel[33] = LOW; step(15); pinLevel[33] = HIGH; step(15); pinLevel[33] = LOW; step(15); pinLevel[33] = HIGH; step(50);
+  CHECK(!oscSt.on, "contact bounce shorter than 30 ms is ignored");
+  lightMode = M_LXFLOW; pinLevel[32] = HIGH; step(50); pinLevel[32] = LOW; step(50);
+  CHECK(oscSt.on && udpSent.size() == sent0 + 2, "LXFlow-only: input shows its look, no OSC");
+  lightMode = M_BOTH;
+  web.body = R"({"what":"input","n":1,"input":{"w":"off","c":"#0000ff","p":"pulse","a":"/test","v":"go"}})"; apiTest();
+  CHECK(lookIs(P_PULSE, 0, 0, 255) && web.lastSent.find("\"osc\":true") != std::string::npos, "page Test shows the row and sends its OSC");
+  CHECK(!strcmp(oscLog[(logHead + OSC_LOG - 1) % OSC_LOG].addr, "test from this page"), "input events appear in the log");
+  { JsonDocument s; gpiState(s); CHECK(s["inputs"][0]["closed"] == true && s["inputs"][0]["pin"] == 32 && s["inputs"][1]["w"] == "open", "state reports pins, closed and settings"); }
   std::cout << (fails ? "FAILED " : "PASSED ") << fails << "\n";
   return fails != 0;
 }

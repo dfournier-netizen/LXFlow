@@ -468,3 +468,21 @@ use the same explicit cell-level backgrounds. The active-cue outline remains on 
   like Companion/MA3/QLab, and `osc.ino` itself through `shim.h`. 38/38 node
   tests. The light's page was checked in a browser against a mock API at desktop and phone
   width. Not yet run on hardware.
+
+### Contact inputs — firmware 1.3.0 — 2026-10-28 (branch, not in main)
+
+- Asked for by a coworker: input only, dry contact, fires for a set time, two inputs. Dom
+  chose: show a look + optional OSC out; 3.5 mm mono jacks; runs under 3 m (internal pull-ups,
+  no extra parts).
+- New tab `firmware/LXFlowCueLight/trigger_inputs.ino` (named to sort after `osc.ino`, whose
+  globals it uses). GPIO 32 = input 1, GPIO 33 = input 2, INPUT_PULLUP, 30 ms debounce,
+  boot state never fires. `struct Gpi { Trig t; uint8_t when; }` in the main tab; `t.addr`/
+  `t.val` are the OSC to send. Stored as JSON in Preferences key `gpi`.
+- Hooks: `gpiSetup()` at the end of `setup()`, `gpiLoop()` after `pollButton()`;
+  `sendAckOut()` split into `sendOscOut(addr, arg)` + wrapper; `/api/state` adds `inputs`
+  (with `pin`, `closed`); `/api/config` takes `inputs` (ignored if absent);
+  `/api/test` `what:"input"` runs a row. Light page: **Contact inputs** section.
+- No LXFlow server or UI changes. 48 checks pass in `firmware/test/osc_logic_test.cpp`
+  (new: debounce, close/open, hold-closed fires once, restart on re-close, button clears,
+  LXFlow-only = no OSC). Page checked against a mock API at 1280 and 390 px. Not yet run
+  on hardware.
