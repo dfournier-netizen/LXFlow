@@ -468,3 +468,28 @@ use the same explicit cell-level backgrounds. The active-cue outline remains on 
   like Companion/MA3/QLab, and `osc.ino` itself through `shim.h`. 38/38 node
   tests. The light's page was checked in a browser against a mock API at desktop and phone
   width. Not yet run on hardware.
+
+### Art-Net pixel mode + tape — firmware 1.4.0 — 2026-11-04
+
+- Built on main (1.2.0); the contact-input branch (1.3.0) is not included.
+- Dom chose: a separate Art-Net mode (`M_ARTNET`, mode "artnet"); RGB × pixels from a set
+  universe (15-bit) and start address; hold the last frame 1–60 s, then idle. No LXFlow,
+  no OSC listener in that mode; the ack button still sends its OSC.
+- New tab `firmware/LXFlowCueLight/artnet.ino`: ArtDmx (OpCode 0x5000) on UDP 6454, drops
+  late packets by sequence, ArtPollReply (239 bytes, unicast to the poller). Prefs keys
+  `auni`, `aadr`, `ahold` (saved with the OSC settings).
+- Tape: `MAX_LEDS` 64 → 170 (one universe of RGB). Pixel count and colour order (prefs
+  `leds`, the setup portal's key, and `order`) set on the light's page; changing either
+  restarts the light. `ring.updateType()` applies the order at boot. "Show red, green,
+  blue" (`/api/test` `what:"rgb"`) lights thirds for 5 s.
+- LXFlow mode gating changed from `!= M_OSC` to `== M_LXFLOW || == M_BOTH` (setup, loop);
+  OSC listener from `!= M_LXFLOW` to `== M_OSC || == M_BOTH`.
+- Output stage `output.ino` (`showOut()`, replaces `ring.show()` in `render()`): gamma 2.2
+  LUT to 16 bits (prefs `gamma`, default on), brightness applied there in 16 bits
+  (`ring.setBrightness(255)` in render), optional temporal dithering (prefs `dither`,
+  default off; remainder per channel in base 257), any lit channel at least 1 when not
+  dithering. Applies to all modes; toggles are live. Works on the raw buffer, so colour
+  order doesn't matter. Tested by `firmware/test/output_test.cpp` (13 checks).
+- No LXFlow server or UI changes. 59 checks pass in `firmware/test/osc_logic_test.cpp`
+  (ArtDmx packets from stupidArtnet via `gen_artnet.py`). Page checked against a mock API
+  at 1280 and 390 px. Not yet run on hardware.

@@ -1,4 +1,4 @@
-// The light's own settings page, served at http://<light IP>/ (firmware 1.2).
+// The light's own settings page, served at http://<light IP>/ (firmware 1.2; Art-Net 1.4).
 #pragma once
 const char PAGE_HTML[] = R"HTML(<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -26,13 +26,32 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:var(-
 </style></head><body><main>
 <header><h1 id="title">LXFlow Cue Light</h1><div class="meta" id="meta">Loading…</div></header>
 
-<section><h2>Mode and OSC</h2>
+<section><h2>Mode, pixels and OSC</h2>
 <div class="row">
-<label>Mode<select id="mode"><option value="both">LXFlow and OSC (OSC wins while active)</option><option value="lxflow">LXFlow only</option><option value="osc">OSC only (no LXFlow)</option></select></label>
+<label>Mode<select id="mode"><option value="both">LXFlow and OSC (OSC wins while active)</option><option value="lxflow">LXFlow only</option><option value="osc">OSC only (no LXFlow)</option><option value="artnet">Art-Net pixel control only</option></select></label>
 <label>OSC name (used in /cuelight/&lt;name&gt;/…)<input id="oscName" maxlength="23" placeholder="e.g. LX"></label>
 <label>OSC listen port (UDP)<input id="oscPort" type="number" min="1" max="65535"></label>
 </div>
-<p class="meta">Send OSC to <b id="sendTo">this light's IP</b>, or broadcast to the network so one message reaches every light. Changing the mode or port restarts the light.</p>
+<div class="row" style="margin-top:10px">
+<label>Pixels (LEDs on the ring or tape)<input id="leds" type="number" min="1" max="170"></label>
+<label>Colour order<select id="order"><option value="grb">GRB (standard WS2812)</option><option value="rgb">RGB</option><option value="rbg">RBG</option><option value="gbr">GBR</option><option value="brg">BRG</option><option value="bgr">BGR</option></select></label>
+<label>Check<button id="rgbTest" type="button">Show red, green, blue</button></label>
+</div>
+<div class="row" style="margin-top:10px">
+<label style="flex-direction:row;display:flex;align-items:center;gap:8px;color:var(--text)"><input id="gamma" type="checkbox">Gamma curve (even-looking fades)</label>
+<label style="flex-direction:row;display:flex;align-items:center;gap:8px;color:var(--text)"><input id="dither" type="checkbox">Dithering (finer low-level steps; may flicker on camera)</label>
+</div>
+<p class="meta">Send OSC to <b id="sendTo">this light's IP</b>, or broadcast to the network so one message reaches every light. Every mode uses all the pixels, gamma and dithering. If the colour check shows the wrong colours, change Colour order. Changing the mode, port, pixels or colour order restarts the light.</p>
+</section>
+
+<section><h2>Art-Net pixel control</h2>
+<div class="row">
+<label>Art-Net universe (0–32767)<input id="artUni" type="number" min="0" max="32767"></label>
+<label>Start address (1–512)<input id="artAddr" type="number" min="1" max="512"></label>
+<label>Hold last frame (seconds)<input id="artHold" type="number" min="1" max="60"></label>
+</div>
+<p class="meta" id="artMap">Used in Art-Net mode only.</p>
+<p class="meta">Status: <b id="artLive">—</b></p>
 </section>
 
 <section><h2>Button sends OSC</h2>
@@ -104,7 +123,8 @@ function rowData(tr){const o={};tr.querySelectorAll('[data-k]').forEach(i=>{cons
 async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.json();}
 async function test(tr){const t=rowData(tr);if(!t.a){msg('Give the trigger an OSC address first.',false);return;}await post('/api/test',{what:'trigger',trigger:t});msg('Showing that look on the light.',true);}
 function fill(s){
-  $('#mode').value=s.mode;$('#oscName').value=s.oscName;$('#oscPort').value=s.oscPort;
+  $('#mode').value=s.mode;$('#leds').value=s.leds;$('#leds').max=s.maxLeds||170;$('#order').value=s.order||'grb';$('#gamma').checked=s.gamma!==false;$('#dither').checked=!!s.dither;$('#oscName').value=s.oscName;$('#oscPort').value=s.oscPort;
+  if(s.art){$('#artUni').value=s.art.uni;$('#artAddr').value=s.art.addr;$('#artHold').value=s.art.hold;artMapText();}
   $('#ackIp').value=s.ackIp;$('#ackPort').value=s.ackPort;$('#ackAddr').value=s.ackAddr;$('#ackArg').value=s.ackArg;
   const tb=$('#trigs');tb.innerHTML='';(s.triggers||[]).forEach(t=>tb.append(trigRow(t)));
 }
@@ -113,21 +133,28 @@ function status(s){
   $('#meta').innerHTML='';
   $('#meta').append('Firmware '+s.fw+' · IP ',el('b',{},s.ip),' · '+s.host.toLowerCase()+'.local · Wi-Fi '+s.rssi+' dBm · LXFlow: '+(s.mode==='osc'?'off (OSC only)':s.linked?'connected '+s.lxflow:'not connected')+' · showing: '+s.showing+(s.mode!=='lxflow'&&!s.oscUp?' · OSC port did not open':''));
   $('#sendTo').textContent=s.ip+' port '+s.oscPort;
+  if(s.art){const a=s.art;
+    $('#artLive').textContent=s.mode!=='artnet'?'off (mode is not Art-Net)':!a.up?'Art-Net port did not open':a.live==='idle'?(a.pkts?'no data for '+a.ago+' s; idle':'waiting for ArtDmx on universe '+a.uni):(a.live==='holding'?'holding last frame':'receiving')+' from '+a.from+' · '+a.pkts+' packets'+(a.polls?' · '+a.polls+' polls answered':'');
+    artMapText();}
   const lg=$('#log');lg.innerHTML='';
   if(!s.log.length)lg.append(el('tr',{},el('td',{colspan:'6',class:'meta'},s.mode==='lxflow'?'OSC is off in LXFlow-only mode.':'Nothing yet. Send something from your console or Companion.')));
   s.log.forEach(r=>lg.append(el('tr',{},el('td',{},r.ago+' s ago'),el('td',{},r.a),el('td',{},r.v),el('td',{},r.from),el('td',{},r.did),
     el('td',{},el('button',{type:'button',onclick:()=>{$('#trigs').append(trigRow({a:r.a,v:r.v}));markDirty();msg('Added. Pick a look, then Save.');}},'Make trigger')))));
 }
+function artMapText(){const n=+$('#leds').value||(state&&state.art&&state.art.leds)||12,u=+$('#artUni').value||0,s=+$('#artAddr').value||1,e=s+n*3-1;
+  $('#artMap').textContent='Used in Art-Net mode only. Net '+(u>>8)+' · Sub-Net '+((u>>4)&15)+' · Universe '+(u&15)+'. '+n+' pixels × R, G, B = channels '+s+'–'+e+(e>512?' (past 512: those LEDs stay dark)':'')+'. Send unicast to '+(state?state.ip:'this light')+', or broadcast on this Wi-Fi network. Levels go through gamma, dithering (if on) and the light\'s brightness setting.';}
 async function load(first){
   try{const s=await (await fetch('/api/state')).json();state=s;status(s);if(first||!dirty)fill(s);}
   catch(e){$('#meta').textContent='Lost contact with the light. Retrying…';}
 }
 $('#addTrig').onclick=()=>{$('#trigs').append(trigRow({}));markDirty();};
+$('#rgbTest').onclick=async()=>{await post('/api/test',{what:'rgb'});msg('Showing red, green, blue for 5 s with the saved colour order.',true);};
 $('#clearNow').onclick=async()=>{await post('/api/test',{what:'clear'});msg('Cleared.',true);};
 $('#ackTest').onclick=async()=>{const r=await post('/api/test',{what:'ack'});msg(r.ok?'Sent. (Save to keep these settings.)':r.error,r.ok);};
 document.querySelectorAll('section input,section select').forEach(i=>{i.addEventListener('input',markDirty);i.addEventListener('change',markDirty);});
 $('#save').onclick=async()=>{
-  const body={mode:$('#mode').value,oscName:$('#oscName').value.trim(),oscPort:+$('#oscPort').value||8000,
+  const body={mode:$('#mode').value,leds:Math.min(+$('#leds').value||12,+$('#leds').max||170),order:$('#order').value,gamma:$('#gamma').checked,dither:$('#dither').checked,oscName:$('#oscName').value.trim(),oscPort:+$('#oscPort').value||8000,
+    artUni:+$('#artUni').value||0,artAddr:+$('#artAddr').value||1,artHold:+$('#artHold').value||3,
     ackIp:$('#ackIp').value.trim(),ackPort:+$('#ackPort').value||8000,ackAddr:$('#ackAddr').value.trim(),ackArg:$('#ackArg').value.trim(),
     triggers:[...$('#trigs').children].map(rowData).filter(t=>t.a)};
   try{const r=await post('/api/config',body);
@@ -137,5 +164,6 @@ $('#save').onclick=async()=>{
     setTimeout(()=>load(true),r.restart?6000:300);}
   catch(e){msg('Could not save: '+e.message,false);}
 };
+['#artUni','#artAddr','#leds'].forEach(k=>$(k).addEventListener('input',artMapText));
 load(true);setInterval(()=>load(false),1500);
 </script></body></html>)HTML";

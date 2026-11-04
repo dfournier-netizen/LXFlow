@@ -1,4 +1,4 @@
-// Just enough Arduino to run osc.ino's logic on a PC.
+// Just enough Arduino to run osc.ino's and artnet.ino's logic on a PC.
 #pragma once
 #include <string>
 #include <map>
@@ -22,6 +22,7 @@ struct String : std::string {
 };
 struct IPAddress {
   uint8_t b[4] = {0, 0, 0, 0};
+  uint8_t operator[](int k) const { return b[k]; }
   IPAddress() {} IPAddress(int a, int c, int d, int e) { b[0] = a; b[1] = c; b[2] = d; b[3] = e; }
   bool fromString(const char *s) { int a, c, d, e; if (sscanf(s, "%d.%d.%d.%d", &a, &c, &d, &e) != 4) return false; *this = IPAddress(a, c, d, e); return true; }
   String toString() const { char t[16]; snprintf(t, 16, "%d.%d.%d.%d", b[0], b[1], b[2], b[3]); return String(t); }
@@ -29,10 +30,12 @@ struct IPAddress {
 struct SerialT { void println(const char *) {} template <class... A> void printf(const char *, A...) {} } Serial;
 struct Sent { std::string ip; int port; std::vector<uint8_t> data; };
 static std::vector<Sent> udpSent;
+static std::map<int, std::vector<std::vector<uint8_t>>> udpInbox;   // port -> packets waiting
 struct WiFiUDP {
-  std::string ip; int port = 0; std::vector<uint8_t> buf;
-  bool begin(int) { return true; } void stop() {} void clear() {}
-  int parsePacket() { return 0; } int read(uint8_t *, int) { return 0; }
+  std::string ip; int port = 0, local = 0; std::vector<uint8_t> buf, rx;
+  bool begin(int p) { local = p; return true; } void stop() {} void clear() { rx.clear(); }
+  int parsePacket() { auto &q = udpInbox[local]; if (q.empty()) return 0; rx = q.front(); q.erase(q.begin()); return (int)rx.size(); }
+  int read(uint8_t *d, int n) { n = std::min(n, (int)rx.size()); memcpy(d, rx.data(), n); return n; }
   IPAddress remoteIP() { return IPAddress(192, 168, 1, 50); }
   bool beginPacket(IPAddress i, int p) { ip = i.toString(); port = p; buf.clear(); return true; }
   void write(const uint8_t *d, int n) { buf.insert(buf.end(), d, d + n); }
@@ -53,6 +56,8 @@ struct Preferences {
   void putUChar(const char *k, uint8_t v) { store[k] = std::to_string(v); }
   uint16_t getUShort(const char *k, uint16_t d) { return store.count(k) ? (uint16_t)std::stoi(store[k]) : d; }
   void putUShort(const char *k, uint16_t v) { store[k] = std::to_string(v); }
+  bool getBool(const char *k, bool d) { return store.count(k) ? store[k] == "1" : d; }
+  void putBool(const char *k, bool v) { store[k] = v ? "1" : "0"; }
 };
 std::map<std::string, std::string> Preferences::store;
 #define HTTP_GET 0
@@ -66,5 +71,6 @@ struct WebServer {
   void send(int c, const char *, const String &s) { lastCode = c; lastSent = s; }
 };
 struct { bool begin(const char *) { return true; } void addService(const char *, const char *, int) {} } MDNS;
-struct { IPAddress localIP() { return IPAddress(192, 168, 1, 77); } int RSSI() { return -50; } } WiFi;
+struct { IPAddress localIP() { return IPAddress(192, 168, 1, 77); } int RSSI() { return -50; }
+  void macAddress(uint8_t *m) { const uint8_t a[6] = { 0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6 }; memcpy(m, a, 6); } } WiFi;
 struct { [[noreturn]] void restart() { throw 1; } } ESP;

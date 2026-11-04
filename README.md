@@ -196,6 +196,10 @@ Parts, wiring, flashing and setup are in [firmware/README.md](firmware/README.md
   custom triggers and an OSC message on button press, set on the light's own page
   (`http://<light IP>/`, linked from Settings). Each light is set to LXFlow, OSC or both.
   See [firmware/README.md](firmware/README.md#osc-firmware-12).
+- **Art-Net and tape (firmware 1.4):** an Art-Net mode where each pixel follows three
+  channels (R, G, B) from a set universe and address, and WS2812 tape in place of the ring
+  (up to 170 pixels, any colour order), all set on the light's page. See
+  [firmware/README.md](firmware/README.md#art-net-pixel-control-firmware-14).
 
 | Condition | Built-in look | When |
 |---|---|---|

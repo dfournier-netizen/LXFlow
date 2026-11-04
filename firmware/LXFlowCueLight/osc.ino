@@ -5,6 +5,7 @@
     lxflow  LXFlow only; OSC is not listened to.
     osc     OSC only; the light never looks for LXFlow and idles with one dim LED.
     both    LXFlow and OSC; an OSC look wins while it is active, then LXFlow shows again.
+    artnet  Art-Net pixel control only (artnet.ino, 1.4); no LXFlow, no OSC looks.
 
   Built-in addresses (<target> = this light's OSC name, its 4-character ID, or "all"):
     /cuelight/<target>/standby | acked | hold | call | places | stop | warning   (arg 0 = off)
@@ -122,13 +123,16 @@ String triggersJson() {
 void loadOscConfig() {
   prefs.begin("cuelight", true);
   lightMode = prefs.getUChar("mode", M_BOTH);
-  if (lightMode > M_BOTH) lightMode = M_BOTH;
+  if (lightMode > M_ARTNET) lightMode = M_BOTH;
   prefs.getString("oname", oscName, sizeof oscName);
   oscPort = prefs.getUShort("oport", 8000);
   prefs.getString("aip", ackIp, sizeof ackIp);
   ackPort = prefs.getUShort("aport", 8000);
   if (prefs.isKey("aaddr")) prefs.getString("aaddr", ackAddr, sizeof ackAddr);
   prefs.getString("aarg", ackArg, sizeof ackArg);
+  artUni = prefs.getUShort("auni", 0);
+  artAddr = prefs.getUShort("aadr", 1);
+  artHold = prefs.getUChar("ahold", 3);
   if (prefs.getBytesLength("bl") == sizeof(blLooks)) prefs.getBytes("bl", blLooks, sizeof(blLooks));
   String tj = prefs.getString("trig", "[]");
   prefs.end();
@@ -145,6 +149,9 @@ void saveOscConfig() {
   prefs.putString("aaddr", ackAddr);
   prefs.putString("aarg", ackArg);
   prefs.putString("trig", triggersJson());
+  prefs.putUShort("auni", artUni);
+  prefs.putUShort("aadr", artAddr);
+  prefs.putUChar("ahold", artHold);
   prefs.end();
 }
 
@@ -288,11 +295,14 @@ void apiState() {
   JsonDocument d;
   d["fw"] = FW_VERSION; d["id"] = deviceId; d["short"] = shortId(); d["host"] = apName;
   d["ip"] = WiFi.localIP().toString(); d["rssi"] = WiFi.RSSI(); d["up"] = millis() / 1000;
-  d["mode"] = lightMode == M_OSC ? "osc" : lightMode == M_LXFLOW ? "lxflow" : "both";
+  d["mode"] = lightMode == M_OSC ? "osc" : lightMode == M_LXFLOW ? "lxflow" : lightMode == M_ARTNET ? "artnet" : "both";
   d["linked"] = linked; d["lxflow"] = linked ? serverIp.toString() + ":" + String(serverPort) : String("");
   d["oscName"] = oscName; d["oscPort"] = oscPort; d["oscUp"] = oscUp;
+  d["leds"] = ledCount; d["maxLeds"] = MAX_LEDS; d["order"] = ORDER_NAMES[colorOrder];
+  d["gamma"] = useGamma; d["dither"] = useDither;
   d["ackIp"] = ackIp; d["ackPort"] = ackPort; d["ackAddr"] = ackAddr; d["ackArg"] = ackArg;
-  d["showing"] = oscSt.on ? oscSt.what : (lightMode == M_OSC ? "idle" : linked ? "LXFlow" : "looking for LXFlow");
+  d["showing"] = lightMode == M_ARTNET ? artShowing() : oscSt.on ? oscSt.what : (lightMode == M_OSC ? "idle" : linked ? "LXFlow" : "looking for LXFlow");
+  artState(d);
   JsonDocument t; deserializeJson(t, triggersJson()); d["triggers"] = t;
   JsonArray lg = d["log"].to<JsonArray>();
   for (uint8_t k = 0; k < logCount; k++) {
@@ -308,23 +318,41 @@ void apiConfig() {
   JsonDocument d;
   if (deserializeJson(d, web.arg("plain"))) { web.send(400, "application/json", "{\"ok\":false,\"error\":\"Bad JSON\"}"); return; }
   uint8_t oldMode = lightMode; uint16_t oldPort = oscPort;
+  uint16_t oldLeds = ledCount; uint8_t oldOrder = colorOrder;
+  if (d["leds"].is<int>()) ledCount = constrain((int)d["leds"], 1, MAX_LEDS);
+  for (uint8_t k = 0; k < 6; k++) if (!strcmp(d["order"] | "", ORDER_NAMES[k])) colorOrder = k;
+  bool oldGamma = useGamma, oldDither = useDither;
+  if (d["gamma"].is<bool>()) useGamma = d["gamma"];
+  if (d["dither"].is<bool>()) useDither = d["dither"];
   const char *m = d["mode"] | "both";
-  lightMode = !strcmp(m, "osc") ? M_OSC : !strcmp(m, "lxflow") ? M_LXFLOW : M_BOTH;
+  lightMode = !strcmp(m, "osc") ? M_OSC : !strcmp(m, "lxflow") ? M_LXFLOW : !strcmp(m, "artnet") ? M_ARTNET : M_BOTH;
   strlcpy(oscName, d["oscName"] | "", sizeof oscName);
   oscPort = constrain((int)(d["oscPort"] | 8000), 1, 65535);
   strlcpy(ackIp, d["ackIp"] | "", sizeof ackIp);
   ackPort = constrain((int)(d["ackPort"] | 8000), 1, 65535);
   strlcpy(ackAddr, d["ackAddr"] | "", sizeof ackAddr);
   strlcpy(ackArg, d["ackArg"] | "", sizeof ackArg);
+  if (d["artUni"].is<int>()) artUni = constrain((int)d["artUni"], 0, 32767);
+  if (d["artAddr"].is<int>()) artAddr = constrain((int)d["artAddr"], 1, 512);
+  if (d["artHold"].is<int>()) artHold = constrain((int)d["artHold"], 1, 60);
   String tj; serializeJson(d["triggers"], tj);
   loadTriggers(tj.c_str());
   if (triggersJson().length() > 3800) {                   // NVS strings top out near 4000 bytes
     loadOscConfig();
+    ledCount = oldLeds; colorOrder = oldOrder; useGamma = oldGamma; useDither = oldDither;
     web.send(400, "application/json", "{\"ok\":false,\"error\":\"Too many triggers to store. Shorten addresses or remove some.\"}");
     return;
   }
   saveOscConfig();
-  bool restart = oldMode != lightMode || oldPort != oscPort;
+  if (useGamma != oldGamma || useDither != oldDither) {   // live, no restart
+    prefs.begin("cuelight", false); prefs.putBool("gamma", useGamma); prefs.putBool("dither", useDither); prefs.end();
+  }
+  if (ledCount != oldLeds || colorOrder != oldOrder) {    // same keys as the setup portal's LED count
+    snprintf(cfgLeds, sizeof cfgLeds, "%u", ledCount);
+    saveConfig();
+    prefs.begin("cuelight", false); prefs.putUChar("order", colorOrder); prefs.end();
+  }
+  bool restart = oldMode != lightMode || oldPort != oscPort || ledCount != oldLeds || colorOrder != oldOrder;
   web.send(200, "application/json", restart ? "{\"ok\":true,\"restart\":true}" : "{\"ok\":true}");
   if (restart) { restartSoon = true; restartAt = millis() + 800; }
 }
@@ -336,6 +364,7 @@ void apiTest() {
   char did[24] = "";
   if (!strcmp(what, "clear")) oscClear();
   else if (!strcmp(what, "ack")) { bool ok = sendAckOut(); web.send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":\"Set an IP address, port and OSC address first.\"}"); return; }
+  else if (!strcmp(what, "rgb")) rgbTestUntil = millis() + 5000;   // colour-order check (main tab)
   else if (!strcmp(what, "trigger")) {                     // preview a row without saving it
     Trig T;
     if (parseTrigger(d["trigger"], T)) fireTrigger(T, did, sizeof did);
@@ -350,7 +379,7 @@ void oscSetup() {                                        // after Wi-Fi is up
   String host = apName; host.toLowerCase();
   if (MDNS.begin(host.c_str())) {
     MDNS.addService("http", "tcp", 80);
-    if (lightMode != M_LXFLOW) MDNS.addService("osc", "udp", oscPort);
+    if (lightMode == M_OSC || lightMode == M_BOTH) MDNS.addService("osc", "udp", oscPort);
   }
   web.on("/", HTTP_GET, []() { web.send(200, "text/html", PAGE_HTML); });
   web.on("/api/state", HTTP_GET, apiState);
@@ -358,7 +387,7 @@ void oscSetup() {                                        // after Wi-Fi is up
   web.on("/api/test", HTTP_POST, apiTest);
   web.onNotFound([]() { web.send(404, "text/plain", "Not found"); });
   web.begin(); webUp = true;
-  if (lightMode != M_LXFLOW) { oscUp = oscUdp.begin(oscPort); Serial.printf("OSC on UDP %u: %s\n", oscPort, oscUp ? "ok" : "failed"); }
+  if (lightMode == M_OSC || lightMode == M_BOTH) { oscUp = oscUdp.begin(oscPort); Serial.printf("OSC on UDP %u: %s\n", oscPort, oscUp ? "ok" : "failed"); }
   Serial.printf("Light page: http://%s/  (http://%s.local/)\n", WiFi.localIP().toString().c_str(), host.c_str());
 }
 

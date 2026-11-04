@@ -6,10 +6,10 @@
 #include <iostream>
 #include <fstream>
 // --- the pieces of LXFlowCueLight.ino that osc.ino uses ---
-#define FW_VERSION "1.2.0"
+#define FW_VERSION "1.4.0"
 enum Pat : uint8_t { P_SOLID, P_FLASH, P_PULSE, P_DBLINK, P_SPIN, P_STROBE, P_COUNTDOWN, P_DOT, P_OFF };
 struct Look { uint8_t r, g, b; uint8_t pat; uint16_t rate; uint8_t lvl; };
-enum Mode : uint8_t { M_LXFLOW, M_OSC, M_BOTH };
+enum Mode : uint8_t { M_LXFLOW, M_OSC, M_BOTH, M_ARTNET };
 enum Builtin : uint8_t { B_STANDBY, B_ACKED, B_GO, B_HOLD, B_CALL, B_PLACES, B_STOP, B_WARNING, B_COUNTDOWN, B_IDLE, B_N };
 struct Trig { char addr[96]; char val[32]; Look look; bool clear; uint16_t dur; bool btnClears; };
 uint8_t lightMode = M_BOTH; char oscName[24] = ""; uint16_t oscPort = 8000;
@@ -17,6 +17,20 @@ Preferences prefs; String deviceId = "A1B2C3D4E5F6", apName = "LXFlow-CueLight-E
 const Look IDLE_LOOK = { 255, 255, 255, P_DOT, 1000, 25 };
 bool linked = false; IPAddress serverIp; uint16_t serverPort = 7390; uint32_t identUntil = 0;
 int lxAcks = 0;
+#define MAX_LEDS 170
+#define NEO_GRB 0
+#define NEO_RGB 1
+#define NEO_RBG 2
+#define NEO_GBR 3
+#define NEO_BRG 4
+#define NEO_BGR 5
+bool useGamma = true, useDither = false;
+uint16_t ledCount = 12; uint8_t colorOrder = 0; uint32_t rgbTestUntil = 0; char cfgLeds[4] = "12";
+const char *ORDER_NAMES[] = { "grb", "rgb", "rbg", "gbr", "brg", "bgr" };
+int configSaves = 0; void saveConfig() { configSaves++; }
+struct Ring { uint32_t px[MAX_LEDS]; void clear() { memset(px, 0, sizeof px); }
+  uint32_t Color(uint8_t r, uint8_t g, uint8_t b) { return (uint32_t)r << 16 | g << 8 | b; }
+  void setPixelColor(uint16_t i, uint32_t c) { if (i < MAX_LEDS) px[i] = c; } } ring;
 uint8_t patFromName(const char *p) { static const char *n[] = { "solid","flash","pulse","dblink","spin","strobe","countdown","dot","off" }; for (uint8_t i = 0; i < 9; i++) if (!strcmp(p, n[i])) return i; return P_SOLID; }
 Look lookFrom(JsonVariantConst v) { Look L = IDLE_LOOK; L.r = v["c"][0] | 0; L.g = v["c"][1] | 0; L.b = v["c"][2] | 0; L.pat = patFromName(v["p"] | "solid"); L.rate = constrain((int)(v["r"] | 1000), 100, 5000); L.lvl = constrain((int)(v["b"] | 255), 1, 255); return L; }
 void sendJson(JsonDocument &) { lxAcks++; }
@@ -24,6 +38,8 @@ Look painted; bool paintedSet = false;
 void paintCd(const Look &L, uint32_t, uint32_t, uint32_t) { painted = L; paintedSet = true; }
 // forward declarations Arduino would generate
 void oscClear(); bool oscPaint(uint32_t); void onOsc(const char *, const OscArg *, int, void *); void buttonPressed(); void loadOscConfig(); void apiConfig(); bool sendAckOut();
+const char *shortId(); void apiTest();
+#include "../LXFlowCueLight/artnet.ino"
 #include "../LXFlowCueLight/osc.ino"
 // --- tests ---
 int fails = 0;
@@ -115,6 +131,64 @@ int main() {
   storeBuiltinLooks(lk.as<JsonVariantConst>());
   send("/cuelight/all/go");
   CHECK(lookIs(P_PULSE, 0, 0, 255), "built-in go uses the look LXFlow sent");
+  // ---- pixel count and colour order (1.4) ----
+  const char *base = R"("oscName":"LX","oscPort":8000,"ackIp":"","ackPort":8000,"ackAddr":"","ackArg":"","triggers":[])";
+  config((std::string(R"({"mode":"osc","leds":60,"order":"rgb",)") + base + "}").c_str());
+  CHECK(ledCount == 60 && colorOrder == 1 && !strcmp(cfgLeds, "60") && Preferences::store["order"] == "1", "pixels 60 + RGB order saved (same key as the setup portal)");
+  CHECK(web.lastSent.find("restart") != std::string::npos, "pixel count change restarts the light");
+  config((std::string(R"({"mode":"osc","leds":999,"order":"nope",)") + base + "}").c_str());
+  CHECK(ledCount == 170 && colorOrder == 1, "pixels capped at 170; unknown order ignored");
+  { JsonDocument s; web.body = ""; apiState(); deserializeJson(s, web.lastSent); CHECK(s["leds"] == 170 && s["maxLeds"] == 170 && s["order"] == "rgb", "state reports pixels, max and order"); }
+  web.body = R"({"what":"rgb"})"; apiTest();
+  CHECK(rgbTestUntil > millis(), "colour check runs from the page");
+  { size_t was = web.lastSent.size(); (void)was;
+    config((std::string(R"({"mode":"osc","leds":170,"order":"rgb","gamma":false,"dither":true,)") + base + "}").c_str());
+    CHECK(!useGamma && useDither && Preferences::store.count("gamma") && web.lastSent.find("restart") == std::string::npos, "gamma off + dither on saved, live (no restart)");
+    JsonDocument s; web.body = ""; apiState(); deserializeJson(s, web.lastSent); CHECK(s["gamma"] == false && s["dither"] == true, "state reports gamma and dither");
+    config((std::string(R"({"mode":"osc","leds":170,"order":"rgb","gamma":true,"dither":false,)") + base + "}").c_str()); }
+  // ---- Art-Net (1.4) ----
+  std::map<std::string, std::vector<uint8_t>> pk;
+  { std::ifstream f("artnet_packets.txt"); std::string name, hex; while (f >> name >> hex) { std::vector<uint8_t> v; for (size_t i = 0; i < hex.size(); i += 2) v.push_back((uint8_t)std::stoi(hex.substr(i, 2), 0, 16)); pk[name] = v; } }
+  CHECK(pk.size() == 3, "ArtDmx packets from stupidArtnet loaded");
+  ledCount = 12;
+  config((std::string(R"({"mode":"artnet","leds":12,"order":"grb","artUni":17,"artAddr":10,"artHold":3,)") + base + "}").c_str());
+  CHECK(lightMode == M_ARTNET && artUni == 17 && artAddr == 10 && Preferences::store["auni"] == "17", "Art-Net mode, universe 17, address 10 saved");
+  oscUp = false; oscSetup();
+  CHECK(!oscUp, "OSC listener stays closed in Art-Net mode");
+  artSetup();
+  CHECK(artUp && !artPaint(millis()), "Art-Net port open; idle before data");
+  udpInbox[6454].push_back(pk["dmx_u300"]); artLoop();
+  CHECK(!artHave, "other universe (300) ignored");
+  udpInbox[6454].push_back(pk["dmx_u17"]); artLoop();
+  CHECK(artPaint(millis()), "universe 17 received");
+  { bool ok = true; for (int i = 0; i < 36; i++) { int ch = 9 + i; uint8_t want = (ch * 7) % 256; uint32_t c = ring.px[i / 3]; uint8_t got = (c >> (16 - 8 * (i % 3))) & 255; if (got != want) ok = false; }
+    CHECK(ok && ring.px[12] == 0, "12 pixels = channels 10-45 as R,G,B; pixel 13 dark"); }
+  fakeMillis += 2500;
+  CHECK(artPaint(millis()) && !strcmp(artShowing(), "Art-Net (holding last frame)"), "holds the last frame within 3 s");
+  fakeMillis += 600;
+  CHECK(!artPaint(millis()) && !artHave, "after the hold time, back to idle");
+  { auto late = pk["dmx_u17"]; late[12] = 50; auto early = late; early[12] = 40; early[18 + 9] = 1;
+    udpInbox[6454].push_back(late); udpInbox[6454].push_back(early); artLoop();
+    CHECK((ring.px[0] = 0, artPaint(millis()), ((ring.px[0] >> 16) & 255) == 63), "a late (older sequence) packet is dropped"); }
+  ledCount = 170; artAddr = 1;
+  udpInbox[6454].push_back(pk["dmx_u17_short"]); artLoop(); artPaint(millis());
+  CHECK(ring.px[7] == 0xC8C8C8 && ring.px[8] == 0, "short packet (24 ch): 8 pixels lit, the rest dark");
+  udpInbox[6454].push_back(pk["dmx_u17"]); artLoop(); artPaint(millis());
+  { uint8_t want = (509 * 7) % 256; CHECK((ring.px[169] & 255) == want, "170 pixels use channels 1-510"); }
+  // ArtPoll -> ArtPollReply
+  { const uint8_t poll[14] = { 'A','r','t','-','N','e','t',0, 0x00,0x20, 0,14, 0,0 };
+    size_t before = udpSent.size(); udpInbox[6454].push_back(std::vector<uint8_t>(poll, poll + 14)); artLoop();
+    CHECK(udpSent.size() == before + 1, "ArtPoll answered");
+    auto &r = udpSent.back().data;
+    CHECK(udpSent.back().ip == "192.168.1.50" && udpSent.back().port == 6454, "reply unicast to the poller on 6454");
+    CHECK(r.size() == 239 && !memcmp(r.data(), "Art-Net", 8) && r[8] == 0x00 && r[9] == 0x21, "239-byte ArtPollReply, OpCode 0x2100");
+    CHECK(r[10] == 192 && r[13] == 77 && r[14] == 0x36 && r[15] == 0x19, "IP and port 6454 in the reply");
+    CHECK(r[18] == 0 && r[19] == 1 && r[190] == 1 && r[174] == 0x80, "universe 17 = Net 0, Sub-Net 1, SwOut 1; one DMX output port");
+    CHECK(!strcmp((const char *)&r[26], "LXFlow CL E5F6") && !strncmp((const char *)&r[44], "LXFlow Cue Light E5F6 LX", 64), "short and long names");
+    CHECK(r[201] == 0xA1 && r[206] == 0xF6 && r[207] == 192 && r[212] == 0x0F, "MAC, BindIp, Status2"); }
+  { JsonDocument s; web.body = ""; apiState(); deserializeJson(s, web.lastSent); CHECK(s["mode"] == "artnet" && s["art"]["uni"] == 17 && s["art"]["live"] == "receiving" && s["art"]["polls"] == 1, "state reports Art-Net status"); }
+  lightMode = M_ARTNET; size_t b2 = udpSent.size(); strcpy(ackIp, "10.0.0.5"); strcpy(ackAddr, "/ack"); buttonPressed();
+  CHECK(udpSent.size() == b2 + 1, "button still sends its OSC in Art-Net mode");
   std::cout << (fails ? "FAILED " : "PASSED ") << fails << "\n";
   return fails != 0;
 }

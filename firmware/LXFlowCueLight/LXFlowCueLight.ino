@@ -8,6 +8,9 @@
 
   Hardware (ESP32-WROOM-32 DevKit, 38- or 30-pin):
     WS2812 ring DIN  -> GPIO 16 (through a 330 ohm resistor)
+    (or WS2812 tape: up to 170 pixels, any colour order; set both on the light's page.
+     Power tape longer than a few pixels from its own 5 V supply, grounds joined:
+     each pixel draws up to about 60 mA at full white.)
     WS2812 ring 5V   -> VIN (USB 5V)       WS2812 GND -> GND
     Ack button       -> GPIO 27 to GND (internal pull-up). The on-board BOOT button also works.
 
@@ -28,6 +31,9 @@
   send an OSC message when its button is pressed, and serves its own settings page at
   http://<light IP>/ or http://lxflow-cuelight-xxxx.local/. See osc.ino.
 
+  Art-Net (1.4): a separate mode (set on the light's page) where each LED follows three
+  Art-Net channels (R, G, B) from a set universe and start address. See artnet.ino.
+
   Libraries (Arduino Library Manager): WiFiManager (tzapu) 2.0.17, WebSockets (Markus Sattler) 2.7.x,
   Adafruit NeoPixel 1.15.x, ArduinoJson 7.x. Board: esp32 by Espressif 3.x, "ESP32 Dev Module".
 */
@@ -43,11 +49,11 @@
 #include <ESPmDNS.h>
 #include "osc_core.h"
 
-#define FW_VERSION      "1.2.0"
+#define FW_VERSION      "1.4.0"
 #define LED_PIN         16
 #define BTN_PIN         27
 #define ACK_BOOT_PIN        0
-#define MAX_LEDS        64
+#define MAX_LEDS        170     // one Art-Net universe of RGB pixels (510 channels)
 #define DISCOVERY_PORT  7391
 #define DEFAULT_PORT    7390
 #define HOLD_PORTAL_MS  5000
@@ -56,7 +62,7 @@
 // A look from LXFlow (declared up here so Arduino's generated prototypes can see it).
 enum Pat : uint8_t { P_SOLID, P_FLASH, P_PULSE, P_DBLINK, P_SPIN, P_STROBE, P_COUNTDOWN, P_DOT, P_OFF };
 struct Look { uint8_t r, g, b; uint8_t pat; uint16_t rate; uint8_t lvl; };
-enum Mode : uint8_t { M_LXFLOW, M_OSC, M_BOTH };
+enum Mode : uint8_t { M_LXFLOW, M_OSC, M_BOTH, M_ARTNET };
 enum Builtin : uint8_t { B_STANDBY, B_ACKED, B_GO, B_HOLD, B_CALL, B_PLACES, B_STOP, B_WARNING, B_COUNTDOWN, B_IDLE, B_N };
 struct Trig { char addr[96]; char val[32]; Look look; bool clear; uint16_t dur; bool btnClears; };
 uint8_t lightMode = M_BOTH;            // set on the light's web page (osc.ino)
@@ -73,6 +79,11 @@ char cfgBright[4] = "80";        // 0-255
 
 uint16_t ledCount = 12;
 uint8_t  bright   = 80;
+uint8_t  colorOrder = 0;         // index into ORDER_*; set on the light's web page (1.4)
+bool     useGamma = true;        // output.ino; set on the light's web page (1.4)
+bool     useDither = false;
+const char *ORDER_NAMES[] = { "grb", "rgb", "rbg", "gbr", "brg", "bgr" };
+const uint16_t ORDER_TYPES[] = { NEO_GRB, NEO_RGB, NEO_RBG, NEO_GBR, NEO_BRG, NEO_BGR };
 
 void loadConfig() {
   prefs.begin("cuelight", true);
@@ -81,7 +92,11 @@ void loadConfig() {
   prefs.getString("code",   cfgCode,   sizeof(cfgCode));
   prefs.getString("leds",   cfgLeds,   sizeof(cfgLeds));
   prefs.getString("bright", cfgBright, sizeof(cfgBright));
+  colorOrder = prefs.getUChar("order", 0);
+  useGamma = prefs.getBool("gamma", true);
+  useDither = prefs.getBool("dither", false);
   prefs.end();
+  if (colorOrder > 5) colorOrder = 0;
   if (!cfgPort[0])   strcpy(cfgPort, "7390");
   if (!cfgLeds[0])   strcpy(cfgLeds, "12");
   if (!cfgBright[0]) strcpy(cfgBright, "80");
@@ -115,6 +130,7 @@ Look lostLook = { 0, 0, 255, P_PULSE, 2400, 89 };   // no link to LXFlow
 Look wifiLook = { 255, 0, 255, P_PULSE, 2400, 89 }; // no Wi-Fi
 uint32_t cdEnd = 0, cdTotal = 0;                    // countdown pattern
 uint32_t identUntil = 0;
+uint32_t rgbTestUntil = 0;                          // colour-order check from the light's page
 
 uint8_t patFromName(const char *p) {
   static const char *names[] = { "solid", "flash", "pulse", "dblink", "spin", "strobe", "countdown", "dot", "off" };
@@ -185,24 +201,36 @@ void paintCd(const Look &L, uint32_t now, uint32_t cdEnd, uint32_t cdTotal) {
 
 void render() {
   uint32_t now = millis();
-  ring.setBrightness(bright);
+  ring.setBrightness(255);                           // brightness, gamma and dither: showOut() (output.ino)
 
   if (identUntil && (int32_t)(identUntil - now) > 0) {
     ring.clear();
     uint16_t head = (now / 60) % ledCount;
     for (uint8_t k = 0; k < 3 && k < ledCount; k++)
       ring.setPixelColor((head + ledCount - k) % ledCount, ring.Color(255 >> k, 255 >> k, 255 >> k));
-    ring.show();
+    showOut();
     return;
   }
   identUntil = 0;
 
+  if (rgbTestUntil && (int32_t)(rgbTestUntil - now) > 0) {   // thirds: red, green, blue
+    ring.clear();
+    for (uint16_t i = 0; i < ledCount; i++) {
+      uint8_t third = i * 3 / ledCount;
+      ring.setPixelColor(i, third == 0 ? ring.Color(255, 0, 0) : third == 1 ? ring.Color(0, 255, 0) : ring.Color(0, 0, 255));
+    }
+    showOut();
+    return;
+  }
+  rgbTestUntil = 0;
+
   if (WiFi.status() != WL_CONNECTED) paint(wifiLook, now);
+  else if (lightMode == M_ARTNET)    { if (!artPaint(now)) paint(builtinLook(B_IDLE), now); }   // artnet.ino
   else if (oscPaint(now))            {}                      // an OSC look is active (osc.ino)
   else if (lightMode == M_OSC)       paint(builtinLook(B_IDLE), now);
   else if (!linked)                  paint(lostLook, now);
   else                               paint(cur, now);
-  ring.show();
+  showOut();
 }
 
 // ---------- WebSocket ----------
@@ -372,6 +400,8 @@ void setup() {
   pHost.setValue(cfgHost, 63); pPort.setValue(cfgPort, 7); pCode.setValue(cfgCode, 31);
   pLeds.setValue(cfgLeds, 3);  pBright.setValue(cfgBright, 3);
 
+  buildGamma();
+  ring.updateType(ORDER_TYPES[colorOrder] + NEO_KHZ800);
   ring.begin();
   ring.updateLength(ledCount);
   showCyan();
@@ -397,14 +427,16 @@ void setup() {
 
   udp.begin(DISCOVERY_PORT + 1);
   oscSetup();
+  artSetup();
   IPAddress ip;
-  if (lightMode != M_OSC && cfgHost[0] && ip.fromString(cfgHost)) startWs(ip, constrain(atoi(cfgPort), 1, 65535));
+  if ((lightMode == M_LXFLOW || lightMode == M_BOTH) && cfgHost[0] && ip.fromString(cfgHost)) startWs(ip, constrain(atoi(cfgPort), 1, 65535));
 }
 
 void loop() {
   pollButton();
   oscLoop();
-  if (WiFi.status() == WL_CONNECTED && lightMode != M_OSC) {
+  artLoop();
+  if (WiFi.status() == WL_CONNECTED && (lightMode == M_LXFLOW || lightMode == M_BOTH)) {
     bool manual = cfgHost[0] != 0;
     if (wsStarted) ws.loop();
     if (!manual && !linked) {

@@ -1,4 +1,4 @@
-# LXFlow Cue Light — firmware 1.2.0
+# LXFlow Cue Light — firmware 1.4.0
 
 One ESP32 + LED ring + button per light. Each light joins the show Wi-Fi, finds LXFlow, and shows
 standby / GO for the position the host assigns it to in LXFlow Settings.
@@ -29,6 +29,36 @@ ESP32 GPIO 27 ──── button ──── GND
 ```
 
 The on-board BOOT button also works as the ack button, so you can bench-test with nothing wired except the ring.
+
+### WS2812 tape instead of the ring (firmware 1.4)
+
+Any WS2812-type tape works in place of the ring, up to 170 pixels. Wire DIN, 5 V and GND the
+same way, then set **Pixels** and **Colour order** on the light's page (**Show red, green,
+blue** checks the order). Every look, OSC and Art-Net use all the pixels.
+
+- **Power:** each pixel draws up to about 60 mA at full white (170 pixels ≈ 10 A). Past a
+  handful of pixels, feed the tape's 5 V from its own supply rather than the ESP32's VIN,
+  and join the supply's ground to the ESP32's GND. The light's brightness setting (Wi-Fi
+  setup page, default 80 of 255) also caps the draw.
+- **Data:** keep the 330 Ω resistor at the tape end of the data wire, and the wire short.
+  The ESP32's 3.3 V data usually drives 5 V tape over a short run; if the first pixel
+  flickers, add a 74AHCT125 level shifter.
+- On tape, *spin* runs as a chase and *countdown* drains along the strip.
+
+### Gamma and dithering (firmware 1.4)
+
+Two switches on the light's page, applied to everything the light shows (LXFlow looks, OSC
+and Art-Net), live with no restart:
+
+- **Gamma curve** (on by default): a 2.2 curve, so fades look even across the fader instead
+  of most of the change happening at the bottom. Any lit channel stays at least 1, so dim
+  looks never go fully dark. Dim looks (the idle dot, the blue lost-link breathing) are
+  much dimmer with gamma on; raise their levels in LXFlow's Looks editor if needed.
+- **Dithering** (off by default): alternates between neighbouring levels on each frame so
+  slow fades at the bottom get finer steps than the pixels' 8 bits. Can flicker on camera.
+- The brightness setting is applied after gamma in 16 bits, so a low brightness no longer
+  costs steps before the curve. WS2812 pixels are 8 bits per colour; 16-bit DMX would not
+  add resolution.
 
 ## Flashing (once per board, from Chrome or Edge)
 
@@ -99,6 +129,7 @@ Settings → Cue lights links to it.
 | LXFlow and OSC (default) | Both work. An OSC look wins while it's active, then LXFlow shows again. |
 | LXFlow only | OSC is ignored. |
 | OSC only | The light never looks for LXFlow, so no blue lost-link breathing. It idles on one dim LED. |
+| Art-Net pixel control only (1.4) | Each pixel follows Art-Net; no LXFlow, no OSC looks. See below. |
 
 **Listening:** UDP port 8000 by default. Send to the light's IP, or broadcast to the network
 so one message reaches every light.
@@ -132,6 +163,27 @@ also acks in LXFlow.
 
 The light's page has no password; anyone on the same network can change it. Keep lights on
 a closed show network.
+
+## Art-Net pixel control (firmware 1.4)
+
+Set **Mode** to *Art-Net pixel control only* on the light's page, then under **Art-Net
+pixel control**:
+
+| Setting | What it does |
+|---|---|
+| Art-Net universe | 0–32767, the 15-bit Port-Address (Net × 256 + Sub-Net × 16 + Universe). The page shows the Net / Sub-Net / Universe split. |
+| Start address | 1–512. Pixel 1 = R, G, B on start, start+1, start+2; pixel 2 = the next three, and so on (36 channels for 12 pixels, 510 for 170). Pixels past channel 512 stay dark. |
+| Hold last frame | 1–60 s. If ArtDmx stops, the last frame holds this long, then the light idles on one dim LED until data returns. |
+
+- Listens on UDP 6454. Send unicast to the light's IP, or broadcast on the Wi-Fi network's
+  own broadcast address. Unicast is more reliable over Wi-Fi.
+- Answers ArtPoll, so it shows up in consoles and Art-Net tools as *LXFlow CL xxxx*.
+- Levels go through gamma and dithering (above), then the light's brightness setting; set
+  brightness to 255 in the Wi-Fi setup page for full output.
+- One sender at a time: packets are not merged (last one wins). Late packets (by Art-Net
+  sequence number) are dropped.
+- The status line on the page shows packets received, from which IP, and polls answered.
+- The ack button still sends its OSC message, if one is set.
 
 ## Host laptop
 
